@@ -1,6 +1,8 @@
 # Bytecode & intermediate files
 *.impb
 *.impb_data
+*.imps
+datasets/
 __pycache__/
 *.py[cod]
 *.log
