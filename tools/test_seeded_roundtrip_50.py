@@ -10,6 +10,7 @@ For each seed:
   6. Verifies Export 1 and Export 2 are 100% bitwise/content identical
 """
 
+import argparse
 import filecmp
 import json
 import os
@@ -76,6 +77,7 @@ def run_single_seed_roundtrip(
     workspace: Path,
     config: GeneratorConfig,
     gen_version: int = 1,
+    fmt: str = "csv",
 ) -> bool:
     seed_dir = workspace / f"seed_{seed}"
     shutil.rmtree(seed_dir, ignore_errors=True)
@@ -99,9 +101,9 @@ def run_single_seed_roundtrip(
     )
     assert orig_imps is not None and orig_imps.is_file()
 
-    # 2. Export 1 (Disassemble snapshot to CSV/datasets + manifest.json)
+    # 2. Export 1 (Disassemble snapshot to datasets + manifest.json)
     res_exp1 = subprocess.run(
-        [str(cli), "snapshot", "export", str(orig_imps), "-o", str(export1_dir), "--format", "csv"],
+        [str(cli), "snapshot", "export", str(orig_imps), "-o", str(export1_dir), "--format", fmt],
         capture_output=True,
         text=True,
     )
@@ -135,9 +137,9 @@ def run_single_seed_roundtrip(
         print(f"  {RED}[FAIL]{RESET} Seed {seed}: Validation on rebuilt snapshot failed:\n{res_val.stderr}")
         return False
 
-    # 5. Export 2 (Disassemble rebuilt snapshot to CSV/datasets + manifest.json)
+    # 5. Export 2 (Disassemble rebuilt snapshot to datasets + manifest.json)
     res_exp2 = subprocess.run(
-        [str(cli), "snapshot", "export", str(rebuilt_imps), "-o", str(export2_dir), "--format", "csv"],
+        [str(cli), "snapshot", "export", str(rebuilt_imps), "-o", str(export2_dir), "--format", fmt],
         capture_output=True,
         text=True,
     )
@@ -157,19 +159,26 @@ def run_single_seed_roundtrip(
 
 
 def main():
-    start_seed = 1001
-    end_seed = 1050
+    parser = argparse.ArgumentParser(description="Impulse Snapshot Round-Trip Idempotency Test Suite")
+    parser.add_argument("--start-seed", type=int, default=1001, help="Starting seed (default: 1001)")
+    parser.add_argument("--end-seed", type=int, default=1050, help="Ending seed (default: 1050)")
+    parser.add_argument("--format", type=str, default="csv", choices=["csv", "parquet"], help="Dataset format (default: csv)")
+    args = parser.parse_args()
+
+    start_seed = args.start_seed
+    end_seed = args.end_seed
     total_seeds = end_seed - start_seed + 1
 
     cli = find_impulse_cli()
     print(f"=========================================================================")
-    print(f"     IMPULSE GRAPH ENGINE — 50 SEEDED SNAPSHOT ROUND-TRIP TEST SUITE     ")
+    print(f"    IMPULSE GRAPH ENGINE — {total_seeds}-SEED SNAPSHOT ROUND-TRIP TEST SUITE     ")
     print(f"=========================================================================")
     print(f"CLI Executable: {cli}")
     print(f"Seed Range:     {start_seed}..{end_seed} ({total_seeds} seeds)")
+    print(f"Format:         {args.format}")
     print(f"=========================================================================\n")
 
-    workspace = Path(tempfile.mkdtemp(prefix="impulse_roundtrip_50_"))
+    workspace = Path(tempfile.mkdtemp(prefix="impulse_roundtrip_"))
     config = GeneratorConfig()
 
     passed = 0
@@ -179,14 +188,14 @@ def main():
     for seed in range(start_seed, end_seed + 1):
         idx = seed - start_seed + 1
         t_seed_start = time.time()
-        ok = run_single_seed_roundtrip(seed, cli, workspace, config)
+        ok = run_single_seed_roundtrip(seed, cli, workspace, config, fmt=args.format)
         elapsed = time.time() - t_seed_start
         if ok:
             passed += 1
-            print(f"[{idx:02d}/{total_seeds}] {GREEN}[PASS]{RESET} Seed {seed} (roundtrip identical in {elapsed:.2f}s)")
+            print(f"[{idx:03d}/{total_seeds:03d}] {GREEN}[PASS]{RESET} Seed {seed} (roundtrip identical in {elapsed:.2f}s)")
         else:
             failed += 1
-            print(f"[{idx:02d}/{total_seeds}] {RED}[FAIL]{RESET} Seed {seed} FAILED")
+            print(f"[{idx:03d}/{total_seeds:03d}] {RED}[FAIL]{RESET} Seed {seed} FAILED")
 
     total_time = time.time() - t0
     shutil.rmtree(workspace, ignore_errors=True)
