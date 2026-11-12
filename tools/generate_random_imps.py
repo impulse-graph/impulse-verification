@@ -270,7 +270,7 @@ def generate_schema(seed: int, gen_version: int, config: GeneratorConfig) -> Gen
     return GeneratedSchema(
         seed=seed,
         gen_version=gen_version,
-        spec_version="0.9.0",
+        spec_version="0.10.0",
         domains=domains,
         relations=relations,
     )
