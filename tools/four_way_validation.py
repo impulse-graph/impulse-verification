@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent.parent
-SPEC_DIR = REPO_DIR / "spec"
+SPEC_DIR = Path(os.environ["IMPULSE_SPEC_DIR"]) if "IMPULSE_SPEC_DIR" in os.environ else REPO_DIR / "spec"
 WORKSPACE_DIR = REPO_DIR.parent
 sys.path.insert(0, str(SPEC_DIR / "tools"))
 
