@@ -76,7 +76,7 @@ def find_impulse_cli() -> Path:
 def parse_matpower_case(case_path: Path) -> Tuple[float, List[List[float]], List[List[float]], List[List[float]], List[List[float]]]:
     text = case_path.read_text(encoding="utf-8")
 
-    m_base = re.search(r"mpc\.baseMVA\s*=\s*([0-9.+-eE]+)\s*;", text)
+    m_base = re.search(r"mpc\.baseMVA\s*=\s*([0-9.+eE\-]+)\s*;", text)
     base_mva = float(m_base.group(1)) if m_base else 100.0
 
     def extract_matrix(section_name: str) -> List[List[float]]:
