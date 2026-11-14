@@ -134,6 +134,7 @@ class VmContractFuzzer:
         reg_state[6] = {TYPE_NODE_VECTOR}
         
         pc = 7
+        aliased_regs: list[int] = []
         
         for _ in range(max_instructions):
             # Find eligible contracts that can accept available register types
@@ -164,7 +165,14 @@ class VmContractFuzzer:
             if not eligible:
                 break
                 
-            c = rng.choice(eligible)
+            # Bias toward mutating a freshly OP_MOV-aliased vector/bitset handle to catch aliasing bugs
+            c = None
+            if aliased_regs and rng.random() < 0.35:
+                alias_ops = [x for x in eligible if x["mnemonic"] in ("OP_FLOAT_VECTOR_SCALE", "OP_VECTOR_DIV", "OP_SET_UNION", "OP_SET_INTERSECT", "OP_VEC_MATH_UNARY")]
+                if alias_ops:
+                    c = rng.choice(alias_ops)
+            if c is None:
+                c = rng.choice(eligible)
             mnemonic = c["mnemonic"]
             allowed_src = c["allowed_src_types"]
             allowed_aux1 = c["allowed_aux1_types"]
@@ -181,7 +189,11 @@ class VmContractFuzzer:
             src_reg = 0
             if allowed_src != 0:
                 valid_srcs = [r for r, types in reg_state.items() if any((allowed_src & (1 << t)) for t in types if t != TYPE_NULL or r == 0)]
-                src_reg = rng.choice(valid_srcs) if valid_srcs else 0
+                alias_srcs = [r for r in aliased_regs if r in valid_srcs]
+                if alias_srcs and mnemonic in ("OP_FLOAT_VECTOR_SCALE", "OP_VECTOR_DIV", "OP_SET_UNION", "OP_SET_INTERSECT", "OP_VEC_MATH_UNARY"):
+                    src_reg = rng.choice(alias_srcs)
+                else:
+                    src_reg = rng.choice(valid_srcs) if valid_srcs else 0
                 
             # Select valid aux1 register (prefer initialized non-null registers)
             aux1_reg = 0
@@ -224,6 +236,8 @@ class VmContractFuzzer:
                     reg_state[dst_reg] = {TYPE_NULL}
                 elif mnemonic == "OP_MOV":
                     reg_state[dst_reg] = set(reg_state.get(src_reg, {TYPE_NULL}))
+                    if reg_state[dst_reg] & {TYPE_FLOAT_VECTOR, TYPE_DOUBLE_VECTOR, TYPE_BITSET_HANDLE, TYPE_NODE_VECTOR}:
+                        aliased_regs.append(dst_reg)
                 elif mnemonic == "OP_FLOAT_VECTOR_SCALE":
                     pass
                 else:
@@ -280,11 +294,24 @@ class VmContractFuzzer:
         elif m == "OP_VECTOR_RERANK_DOT":
             return f"{hex_pc}: {m:<24} R{dst}, R{src}, R{aux1}, 0, 0"
         elif m == "OP_LOAD_CONST_INT":
-            val = rng.randint(1, 100)
+            val = rng.choice([-16, -1, 0, rng.randint(1, 100)]) if rng.random() < 0.2 else rng.randint(1, 100)
             return f"{hex_pc}: {m:<24} R{dst}, {val}"
         elif m == "OP_LOAD_CONST_FLOAT":
             val = round(rng.uniform(0.1, 10.0), 2)
             return f"{hex_pc}: {m:<24} R{dst}, {val}"
+        elif m == "OP_VECTOR_DIV":
+            return f"{hex_pc}: {m:<24} R{dst}, R{src}, R{aux1}"
+        elif m in ("OP_EWISE_ADD", "OP_EWISE_MULT", "OP_COALESCE"):
+            return f"{hex_pc}: {m:<24} R{dst}, R{src}, R{aux1}"
+        elif m in ("OP_MXV", "OP_VXM"):
+            return f"{hex_pc}: {m:<24} R{dst}, R{src}, 0"
+        elif m == "OP_REDUCE":
+            red_op = rng.choice([0, 1, 2, 3, 6, 7])
+            return f"{hex_pc}: {m:<24} R{dst}, R{src}, {red_op}"
+        elif m in ("OP_ALLOC_SCRATCH", "OP_ASSERT_SCRATCH_BYTES"):
+            return f"{hex_pc}: {m:<24} R{src}"
+        elif m == "OP_STREAM_SELECT":
+            return f"{hex_pc}: {m:<24} R{dst}, R{src}, 0"
         elif m == "OP_ASSERT":
             return f"{hex_pc}: {m:<24} R{src}, 0"
         else:
