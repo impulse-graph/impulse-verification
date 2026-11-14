@@ -31,9 +31,9 @@ def run_cpp_compiler(type_name, cel_expr):
     
     class CompiledQuery(ctypes.Structure):
         _fields_ = [
-            ("bytecode", ctypes.POINTER(ctypes.c_uint8)),
-            ("bytecode_length", ctypes.c_size_t),
             ("instruction_count", ctypes.c_size_t),
+            ("bytecode_length", ctypes.c_size_t),
+            ("bytecode", ctypes.POINTER(ctypes.c_uint8)),
         ]
         
     lib.impulse_compile_cel.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.POINTER(CompiledQuery))]
