@@ -323,7 +323,7 @@ def main():
     parser.add_argument("--seed", type=int, default=1337, help="Starting random seed")
     parser.add_argument("--max-instrs", type=int, default=12, help="Max random instructions per program")
     parser.add_argument("--shrink", action="store_true", help="Perform delta-debugging shrinking on discrepancies")
-    parser.add_argument("--contracts", type=str, default=str(TOOLS_DIR / "contracts.json"), help="Path to contracts.json")
+    parser.add_argument("--contracts", type=str, default=str(SPEC_DIR / "tools" / "contracts.json"), help="Path to contracts.json")
     parser.add_argument("--dump-dir", type=str, default=str(TOOLS_DIR / "fuzz_findings"), help="Directory to save finding artifacts")
     args = parser.parse_args()
 
@@ -369,6 +369,7 @@ def main():
 
     passed_count = 0
     divergence_count = 0
+    error_count = 0
     temp_impas = TOOLS_DIR / ".fuzz_tmp.impas"
 
     print(f"Running {args.iterations} fuzzing iterations (seed={args.seed}, max_instrs={args.max_instrs})...\n")
@@ -413,6 +414,7 @@ def main():
                 print(f"{GREEN}[CONSENSUS]{RESET} Iter {i+1:3d} (Seed {iter_seed}): Hash={h}... Status={c_on['status']} PC={c_on['pc']}")
 
         except Exception as e:
+            error_count += 1
             print(f"{RED}[ERROR]{RESET} Iteration {i+1} execution failed: {e}")
         finally:
             if temp_impas.exists(): temp_impas.unlink()
@@ -420,9 +422,11 @@ def main():
             if (TOOLS_DIR / ".fuzz_tmp.impb_data").exists(): (TOOLS_DIR / ".fuzz_tmp.impb_data").unlink()
 
     print(f"\n{BOLD}{BLUE}==============================================================={RESET}")
-    print(f"Fuzzing Complete: {passed_count} Consensus Matches, {divergence_count} Divergences Captured")
+    print(f"Fuzzing Complete: {passed_count} Consensus Matches, {divergence_count} Divergences Captured, {error_count} Errors")
     print(f"Reproducing artifacts saved in: {dump_dir}")
     print(f"{BOLD}{BLUE}==============================================================={RESET}\n")
+    if divergence_count > 0 or error_count > 0:
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

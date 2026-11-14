@@ -70,7 +70,7 @@ def run_cpp(lib, test_file):
     }
 
 def run_java(test_file, impb_file, impb_data_file, cp):
-    java_dir = Path(__file__).resolve().parent.parent.parent / "impulse-graph-java"
+    java_dir = Path(os.environ.get("IMPULSE_JAVA_DIR", str(Path(__file__).resolve().parent.parent.parent / "impulse-graph-java")))
     java_bin = os.environ.get("JAVA_HOME", "")
     if java_bin and os.path.exists(os.path.join(java_bin, "bin", "java")):
         java_cmd = os.path.join(java_bin, "bin", "java")
@@ -252,7 +252,8 @@ def main():
                 cpp_on_state = run_cpp(lib_on, test_file)
                 cpp_off_state = run_cpp(lib_off, test_file)
                 
-                if "status" not in cpp_on_state or "status" not in cpp_off_state:
+                if not cpp_on_state or not cpp_off_state or "status" not in cpp_on_state or "status" not in cpp_off_state:
+                    skipped_count += 1
                     print(f"{YELLOW}[SKIP]{RESET} {rel_path} (C++ returned invalid JSON)")
                     continue
                     

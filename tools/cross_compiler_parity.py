@@ -9,7 +9,15 @@ import ctypes
 import os
 
 def run_cpp_compiler(type_name, cel_expr):
-    cpp_dir = Path(__file__).resolve().parent.parent.parent / "impulse-graph-core" / "impulse-cpp" / "build_temp"
+    cpp_root = Path(__file__).resolve().parent.parent.parent / "impulse-graph-core" / "impulse-cpp"
+    env_dir = os.environ.get("IMPULSE_CPP_DIR")
+    if env_dir:
+        cpp_dir = Path(env_dir)
+    else:
+        cpp_dir = next(
+            (cpp_root / name for name in ("build_on", "build", "build_off", "build_temp") if (cpp_root / name).is_dir()),
+            cpp_root / "build_on",
+        )
     
     # Load dylib
     if sys.platform == 'darwin':
@@ -119,6 +127,8 @@ def main():
 
     print("===============================================================")
     print(f"Passed {passed}/{len(test_expressions)}")
+    if passed != len(test_expressions):
+        sys.exit(1)
     
 if __name__ == "__main__":
     main()
