@@ -23,6 +23,7 @@ impulse-graph-spec (pinned at spec/)
 | `tools/generate_random_imps.py` | Deterministic, seeded, versioned (`.imps`) schema and dataset generator synthesizing random domains (`D1`..`Dk`), relations (`R_D1_D2_1`..), and typed/nullable attributes (`D1_A1_INT`, `D1_A2_NULL_INT`, `R_D1_D2_1_A1_VEC4_FLOAT`, etc.) into `manifest.json` + CSVs and compiling/validating `.imps` snapshots via `impulse-graph`. |
 | `tools/generate_fixtures.py` | Canonical topology snapshot fixture generator (`g0_empty.imps` .. `g7_bipartite_rebac.imps`). |
 | `tools/cross_compiler_parity.py` | Cross-compiler bytecode parity runner comparing C++ and Java CEL / traversal compilation outputs. |
+| `tools/cli_side_by_side_parity.py` | Side-by-side CLI differential parity suite verifying cross-compatibility, schema/stats parity, bitwise `.impb` assembly identity, cross-disassembly, VM execution, and negative error handling between Rust `impulse-graph` and Java `impulse-j`. |
 | `tools/three_way_validation.py` | Legacy three-way validation runner. |
 | `java-cross-engine/` | Relocated Java JNA/CLI cross-engine verification tests (`CrossEngineVerificationTest.java`, `SnapshotBuilderCliValidationTest.java`). |
 
@@ -46,3 +47,19 @@ python3 tools/four_way_validation.py
 ```
 
 By default, `four_way_validation.py` auto-discovers sibling repositories in `../impulse-graph-core`, `../impulse-graph-java`, and `../impulse-ocaml` (or respects `IMPULSE_LIB_PATH_ON`, `IMPULSE_LIB_PATH_OFF`, `IMPULSE_CORE_DIR`, `IMPULSE_JAVA_DIR`).
+
+## Running Side-by-Side CLI Parity (`impulse-graph` vs. `impulse-j`)
+
+```bash
+# Auto-discover newest Rust `impulse-graph` and sibling Java `impulse-j`
+python3 tools/cli_side_by_side_parity.py --verbose
+
+# Explicit binary overrides and category filtering (1..6 or build,inspect,validate,stats,assemble,run,compile)
+python3 tools/cli_side_by_side_parity.py \
+  --rust-cli ../impulse-graph-core/impulse-cli/target/release/impulse-graph \
+  --java-cli ../impulse-graph-java/impulse-cli/src/main/scripts/impulse-j \
+  --category build,inspect,validate,stats,assemble,run \
+  --verbose
+```
+
+Environment variables `IMPULSE_RUST_CLI` and `IMPULSE_JAVA_CLI` are also supported. The runner exits `0` on 100% parity pass and `1` on any discrepancy.
