@@ -1399,7 +1399,8 @@ OP_HALT
 .relation FOLLOWS = 0
 OP_INIT_INPUT_NODE R0, 0
 OP_CSR_WALK R1, R0, REL_FOLLOWS
-OP_CSC_WALK R2, R1, REL_FOLLOWS
+; Single-word packed payload (srcReg=R1=1, relId=0 -> 0x00000001); avoids assemble.rs:516 (63<<16) bug (core#148)
+OP_CSC_WALK R2, 0x00000001
 OP_COLLECT_BITSET R63, R2
 OP_HALT
 """,
