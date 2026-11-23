@@ -5,8 +5,10 @@ import os
 import re
 import sys
 import json
+import time
 import tempfile
 import subprocess
+import multiprocessing as mp
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent.parent
@@ -23,17 +25,24 @@ BLUE = "\033[94m"
 RESET = "\033[0m"
 BOLD = "\033[1m"
 
-def run_cpp(lib, test_file):
-    instrs, data_buf, expectations, opcodes_used = parse_impas_file(test_file)
+def _resolve_java_cmd():
+    java_bin = os.environ.get("JAVA_HOME", "")
+    if java_bin and os.path.exists(os.path.join(java_bin, "bin", "java")):
+        return os.path.join(java_bin, "bin", "java")
+    if os.path.exists("/opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java"):
+        return "/opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java"
+    return "java"
+
+
+def run_cpp_parsed(lib, instrs, data_buf, expectations):
     if not instrs:
         return None
-    
     ctx = lib.impulse_vm_context_create(None)
     if "fuel" in expectations:
         lib.impulse_vm_context_set_fuel(ctx, expectations["fuel"])
     elif os.environ.get("IMPULSE_TEST_ENABLE_FUEL") == "1":
         lib.impulse_vm_context_set_fuel(ctx, 1000000)
-    
+
     c_buf = None
     if data_buf:
         c_buf = (ctypes.c_char * len(data_buf)).from_buffer_copy(data_buf)
@@ -41,7 +50,7 @@ def run_cpp(lib, test_file):
 
     state = VmState()
     state.query_context = ctx
-    
+
     c_instrs = (Instruction * len(instrs))(*instrs)
     status_code = lib.impulse_vm_execute(c_instrs, len(instrs), ctypes.byref(state), 0)
     status_name = STATUS_NAMES.get(status_code, f"UNKNOWN({status_code})")
@@ -49,16 +58,13 @@ def run_cpp(lib, test_file):
     hex_buf = ctypes.create_string_buffer(65)
     lib.impulse_vm_state_hash_hex(ctypes.byref(state), status_code, hex_buf)
     context_hash = hex_buf.value.decode("utf-8")
-    
+
     zf = bool(state.flags & (1 << 0))
     st = bool(state.flags & (1 << 4))
-    
-    regs = {}
-    reg_types = {}
-    for i in range(64):
-        regs[f"R{i}"] = state.registers[i]
-        reg_types[f"R{i}"] = state.register_types[i]
-        
+
+    regs = {f"R{i}": state.registers[i] for i in range(64)}
+    reg_types = {f"R{i}": state.register_types[i] for i in range(64)}
+
     lib.impulse_vm_context_destroy(ctx)
     return {
         "status": status_name,
@@ -68,6 +74,136 @@ def run_cpp(lib, test_file):
         "registers": regs,
         "register_types": reg_types
     }
+
+
+def run_cpp(lib, test_file):
+    instrs, data_buf, expectations, _ = parse_impas_file(test_file)
+    return run_cpp_parsed(lib, instrs, data_buf, expectations)
+
+
+class JavaBatchClient:
+    def __init__(self, cp):
+        self.java_dir = Path(os.environ.get("IMPULSE_JAVA_DIR", str(WORKSPACE_DIR / "impulse-graph-java")))
+        cmd = [
+            _resolve_java_cmd(),
+            "--add-modules", "jdk.incubator.vector",
+            "-cp", cp,
+            "org.impulsegraph.vm.JavaVmJsonRunner",
+            "--batch",
+        ]
+        self.proc = subprocess.Popen(
+            cmd, cwd=self.java_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, bufsize=1,
+        )
+
+    def run(self, test_file, impb_file, impb_data_file):
+        self.proc.stdin.write(f"{Path(test_file).resolve()}\t{Path(impb_file).resolve()}\t{Path(impb_data_file).resolve()}\n")
+        self.proc.stdin.flush()
+        line = self.proc.stdout.readline()
+        if not line:
+            err = self.proc.stderr.read()
+            raise Exception(f"Java batch worker exited unexpectedly: {err}")
+        return json.loads(line.strip())
+
+    def close(self):
+        if self.proc:
+            try:
+                self.proc.stdin.close()
+                self.proc.wait(timeout=3)
+            except Exception:
+                self.proc.kill()
+            self.proc = None
+
+
+class OcamlBatchClient:
+    def __init__(self):
+        ocaml_bin = WORKSPACE_DIR / "impulse-ocaml" / "_build" / "install" / "default" / "bin" / "impulse-ocaml"
+        self.proc = subprocess.Popen(
+            [str(ocaml_bin), "--bin-batch"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1,
+        )
+
+    def run(self, impb_file, impb_data_file):
+        self.proc.stdin.write(f"{Path(impb_file).resolve()}\t{Path(impb_data_file).resolve()}\n")
+        self.proc.stdin.flush()
+        line = self.proc.stdout.readline()
+        if not line:
+            err = self.proc.stderr.read()
+            raise Exception(f"OCaml batch worker exited unexpectedly: {err}")
+        return json.loads(line.strip())
+
+    def close(self):
+        if self.proc:
+            try:
+                self.proc.stdin.close()
+                self.proc.wait(timeout=3)
+            except Exception:
+                self.proc.kill()
+            self.proc = None
+
+
+def _setup_cpp_lib(lib_path):
+    lib = ctypes.CDLL(lib_path)
+    lib.impulse_vm_context_create.argtypes = [ctypes.c_void_p]
+    lib.impulse_vm_context_create.restype = ctypes.c_void_p
+    lib.impulse_vm_context_destroy.argtypes = [ctypes.c_void_p]
+    lib.impulse_vm_context_destroy.restype = None
+    lib.impulse_vm_context_bind_inline_data.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+    lib.impulse_vm_context_bind_inline_data.restype = None
+    lib.impulse_vm_context_set_fuel.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+    lib.impulse_vm_context_set_fuel.restype = None
+    lib.impulse_vm_execute.argtypes = [ctypes.POINTER(Instruction), ctypes.c_size_t, ctypes.POINTER(VmState), ctypes.c_uint64]
+    lib.impulse_vm_execute.restype = ctypes.c_int
+    lib.impulse_vm_state_hash_hex.argtypes = [ctypes.POINTER(VmState), ctypes.c_int32, ctypes.c_char_p]
+    lib.impulse_vm_state_hash_hex.restype = ctypes.c_int
+    return lib
+
+
+def _validate_chunk(args):
+    file_paths, lib_on_path, lib_off_path, cp, spec_dir_str = args
+    spec_dir = Path(spec_dir_str)
+    lib_on = _setup_cpp_lib(lib_on_path)
+    lib_off = _setup_cpp_lib(lib_off_path)
+    java_cli = JavaBatchClient(cp)
+    ocaml_cli = OcamlBatchClient()
+    results = []
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            impb_file = tmp_path / "prog.impb"
+            impb_data_file = tmp_path / "prog.impb_data"
+            for fp_str in file_paths:
+                test_file = Path(fp_str)
+                rel_path = str(test_file.relative_to(spec_dir))
+                try:
+                    instrs, data_bytes, expectations, _ = parse_impas_file(test_file)
+                    if not instrs:
+                        results.append((rel_path, "SKIP", ["Empty program"]))
+                        continue
+                    cpp_on_state = run_cpp_parsed(lib_on, instrs, data_bytes, expectations)
+                    cpp_off_state = run_cpp_parsed(lib_off, instrs, data_bytes, expectations)
+                    if not cpp_on_state or not cpp_off_state or "status" not in cpp_on_state or "status" not in cpp_off_state:
+                        results.append((rel_path, "SKIP", ["C++ returned invalid state"]))
+                        continue
+                    c_instrs = (Instruction * len(instrs))(*instrs)
+                    with open(impb_file, "wb") as f:
+                        f.write(bytes(c_instrs))
+                    with open(impb_data_file, "wb") as f:
+                        f.write(data_bytes)
+                    java_state = java_cli.run(test_file, impb_file, impb_data_file)
+                    ocaml_state = ocaml_cli.run(impb_file, impb_data_file)
+                    diffs = compare_state(cpp_on_state, cpp_off_state, java_state, ocaml_state, expectations)
+                    if not diffs:
+                        results.append((rel_path, "PASS", []))
+                    else:
+                        results.append((rel_path, "FAIL", diffs))
+                except Exception as e:
+                    results.append((rel_path, "ERROR", [str(e)]))
+    finally:
+        java_cli.close()
+        ocaml_cli.close()
+    return results
 
 def run_java(test_file, impb_file, impb_data_file, cp):
     java_dir = Path(os.environ.get("IMPULSE_JAVA_DIR", str(Path(__file__).resolve().parent.parent.parent / "impulse-graph-java")))
@@ -138,10 +274,10 @@ def compare_state(cpp_on_state, cpp_off_state, java_state, ocaml_state, expectat
         if c_on_type >= 4:
             continue
             
-        c_on_val = cpp_on_state["registers"].get(reg, 0)
-        c_off_val = cpp_off_state["registers"].get(reg, 0)
-        j_val = java_state["registers"].get(reg, 0)
-        o_val = ocaml_state["registers"].get(reg, 0)
+        c_on_val = cpp_on_state["registers"].get(reg, 0) & 0xFFFFFFFFFFFFFFFF
+        c_off_val = cpp_off_state["registers"].get(reg, 0) & 0xFFFFFFFFFFFFFFFF
+        j_val = java_state["registers"].get(reg, 0) & 0xFFFFFFFFFFFFFFFF
+        o_val = ocaml_state["registers"].get(reg, 0) & 0xFFFFFFFFFFFFFFFF
         if c_on_val != j_val or c_on_val != o_val or c_off_val != j_val:
             diffs.append(f"{reg} mismatch: C++(ON)={c_on_val}, C++(OFF)={c_off_val}, Java={j_val}, OCaml={o_val}")
             
@@ -175,10 +311,11 @@ def compare_state(cpp_on_state, cpp_off_state, java_state, ocaml_state, expectat
 
         for r_idx, exp_val in expectations.get("registers", {}).items():
             reg = f"R{r_idx}"
+            exp_u64 = exp_val & 0xFFFFFFFFFFFFFFFF
             for name, st in [("C++(ON)", cpp_on_state), ("C++(OFF)", cpp_off_state), ("Java", java_state), ("OCaml", ocaml_state)]:
-                act_val = st["registers"].get(reg, 0)
-                if act_val != exp_val:
-                    diffs.append(f"Expectation {reg} mismatch: {name} got {act_val}, expected {exp_val}")
+                act_val = st["registers"].get(reg, 0) & 0xFFFFFFFFFFFFFFFF
+                if act_val != exp_u64:
+                    diffs.append(f"Expectation {reg} mismatch: {name} got {st['registers'].get(reg, 0)}, expected {exp_val}")
 
     return diffs
 
@@ -189,6 +326,7 @@ def main():
     print(f"{BOLD}{BLUE}==============================================================={RESET}\n")
 
 
+    t0 = time.perf_counter()
     core_cpp_dir = Path(os.environ.get("IMPULSE_CORE_DIR", str(WORKSPACE_DIR / "impulse-graph-core"))) / "impulse-cpp"
     ext = "dylib" if sys.platform == "darwin" else ("dll" if sys.platform == "win32" else "so")
     default_on = core_cpp_dir / "build_on" / f"libimpulse_graph.{ext}"
@@ -196,36 +334,33 @@ def main():
 
     lib_on_path = os.environ.get("IMPULSE_LIB_PATH_ON", str(default_on) if default_on.exists() else None)
     lib_off_path = os.environ.get("IMPULSE_LIB_PATH_OFF", str(default_off) if default_off.exists() else None)
-    
+
     if not lib_on_path or not lib_off_path:
         print("Please set IMPULSE_LIB_PATH_ON and IMPULSE_LIB_PATH_OFF environment variables.")
         sys.exit(1)
-        
-    lib_on = ctypes.CDLL(lib_on_path)
-    lib_off = ctypes.CDLL(lib_off_path)
-    
-    for lib in [lib_on, lib_off]:
-        lib.impulse_vm_context_create.argtypes = [ctypes.c_void_p]
-        lib.impulse_vm_context_create.restype = ctypes.c_void_p
-        lib.impulse_vm_context_destroy.argtypes = [ctypes.c_void_p]
-        lib.impulse_vm_context_destroy.restype = None
-        lib.impulse_vm_context_bind_inline_data.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
-        lib.impulse_vm_context_bind_inline_data.restype = None
-        lib.impulse_vm_context_set_fuel.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
-        lib.impulse_vm_context_set_fuel.restype = None
-        lib.impulse_vm_execute.argtypes = [ctypes.POINTER(Instruction), ctypes.c_size_t, ctypes.POINTER(VmState), ctypes.c_uint64]
-        lib.impulse_vm_execute.restype = ctypes.c_int
-        lib.impulse_vm_state_hash_hex.argtypes = [ctypes.POINTER(VmState), ctypes.c_int32, ctypes.c_char_p]
-        lib.impulse_vm_state_hash_hex.restype = ctypes.c_int
-
 
     spec_dir = SPEC_DIR
     test_dir = spec_dir / "test-vectors" / "vm-impas"
-    if len(sys.argv) > 1:
-        pattern = sys.argv[1]
-        impas_files = [f for f in test_dir.glob("**/*.impas") if pattern in str(f)]
+    workers = min(8, os.cpu_count() or 1)
+    pattern = None
+    quiet = False
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == "--workers" and i + 1 < len(args):
+            workers = max(1, int(args[i + 1]))
+            i += 2
+        elif args[i] in ("-q", "--quiet"):
+            quiet = True
+            i += 1
+        else:
+            pattern = args[i]
+            i += 1
+
+    if pattern:
+        impas_files = sorted(f for f in test_dir.glob("**/*.impas") if pattern in str(f))
     else:
-        impas_files = list(test_dir.glob("**/*.impas"))
+        impas_files = sorted(test_dir.glob("**/*.impas"))
 
     # Generate Java classpath dynamically
     java_dir = Path(os.environ.get("IMPULSE_JAVA_DIR", str(WORKSPACE_DIR / "impulse-graph-java")))
@@ -233,62 +368,50 @@ def main():
     if not cp_file.exists():
         print(f"{YELLOW}Generating Maven classpath...{RESET}")
         subprocess.run(["mvn", "dependency:build-classpath", "-Dmdep.outputFile=cp.txt", "-pl", "impulse-vm"], cwd=java_dir, check=True, stdout=subprocess.DEVNULL)
-        
+
     with open(cp_file, "r") as f:
         maven_cp = f.read().strip()
-        
+
     cp = f"impulse-vm/target/classes:impulse-vm/target/test-classes:impulse-api/target/classes:impulse-storage/target/classes:impulse-spec/target/classes:{maven_cp}"
 
     passed_count = 0
     failed_count = 0
     skipped_count = 0
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
-        for test_file in sorted(impas_files):
-            rel_path = test_file.relative_to(spec_dir)
-            print(f"Testing {rel_path}...", flush=True)
-            try:
-                cpp_on_state = run_cpp(lib_on, test_file)
-                cpp_off_state = run_cpp(lib_off, test_file)
-                
-                if not cpp_on_state or not cpp_off_state or "status" not in cpp_on_state or "status" not in cpp_off_state:
-                    skipped_count += 1
-                    print(f"{YELLOW}[SKIP]{RESET} {rel_path} (C++ returned invalid JSON)")
-                    continue
-                    
-                # Write instructions to temporary .impb / .impb_data for Java and OCaml
-                instrs, data_bytes, expectations, _ = parse_impas_file(test_file)
-                
-                c_instrs = (Instruction * len(instrs))(*instrs)
-                impb_file = tmp_path / f"{test_file.stem}.impb"
-                with open(impb_file, 'wb') as f:
-                    f.write(bytes(c_instrs))
-                    
-                impb_data_file = tmp_path / f"{test_file.stem}.impb_data"
-                with open(impb_data_file, 'wb') as f:
-                    f.write(data_bytes)
-                    
-                java_state = run_java(test_file, impb_file, impb_data_file, cp)
-                ocaml_state = run_ocaml(test_file, impb_file, impb_data_file)
-                
-                diffs = compare_state(cpp_on_state, cpp_off_state, java_state, ocaml_state, expectations)
-                
-                if not diffs:
-                    print(f"{GREEN}[PASS]{RESET} {rel_path} (All 4 match)")
-                    passed_count += 1
-                else:
-                    print(f"{RED}[FAIL]{RESET} {rel_path}")
-                    for d in diffs:
-                        print(f"       -> {RED}{d}{RESET}")
-                    failed_count += 1
-                    
-            except Exception as e:
-                print(f"{RED}[ERROR]{RESET} {rel_path}: {e}")
-                failed_count += 1
+    eff_workers = min(workers, max(1, len(impas_files) // 8)) if len(impas_files) >= 16 else 1
+    str_files = [str(f) for f in impas_files]
+    if eff_workers <= 1:
+        all_results = _validate_chunk((str_files, lib_on_path, lib_off_path, cp, str(spec_dir)))
+    else:
+        chunks = [str_files[k::eff_workers] for k in range(eff_workers)]
+        ctx_mp = mp.get_context("spawn")
+        with ctx_mp.Pool(processes=eff_workers) as pool:
+            chunk_results = pool.map(
+                _validate_chunk,
+                [(c, lib_on_path, lib_off_path, cp, str(spec_dir)) for c in chunks if c],
+            )
+        all_results = sorted((item for sub in chunk_results for item in sub), key=lambda x: x[0])
 
+    for rel_path, status, msgs in all_results:
+        if status == "PASS":
+            if not quiet:
+                print(f"{GREEN}[PASS]{RESET} {rel_path} (All 4 match)")
+            passed_count += 1
+        elif status == "SKIP":
+            print(f"{YELLOW}[SKIP]{RESET} {rel_path} ({'; '.join(msgs)})")
+            skipped_count += 1
+        elif status == "FAIL":
+            print(f"{RED}[FAIL]{RESET} {rel_path}")
+            for d in msgs:
+                print(f"       -> {RED}{d}{RESET}")
+            failed_count += 1
+        else:
+            print(f"{RED}[ERROR]{RESET} {rel_path}: {'; '.join(msgs)}")
+            failed_count += 1
+
+    elapsed = time.perf_counter() - t0
     print(f"\n{BOLD}{BLUE}==============================================================={RESET}")
-    print(f"{BOLD}Total Test Files Examined:{RESET} {len(impas_files)}")
+    print(f"{BOLD}Total Test Files Examined:{RESET} {len(impas_files)} ({elapsed:.2f}s, {eff_workers} worker(s))")
     print(f"{BOLD}{GREEN}Passed (Identical):{RESET} {passed_count}")
     print(f"{BOLD}{RED}Failed (Mismatch/Error):{RESET} {failed_count}")
     print(f"{BOLD}{YELLOW}Skipped:{RESET} {skipped_count}")
