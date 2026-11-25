@@ -62,18 +62,23 @@ def main():
     py = sys.executable
     stages = [
         (
-            "1/3 Four-Way Spec Compliance",
+            "0/4 Core Engine Invariant Arch-Lint",
+            [py, "-u", str(TOOLS_DIR / "check_engine_invariants.py")],
+            REPO_DIR,
+        ),
+        (
+            "1/4 Four-Way Spec Compliance",
             [py, "-u", str(TOOLS_DIR / "four_way_validation.py"), "-q", "--workers", str(args.workers)],
             REPO_DIR,
         ),
         (
-            f"2/3 Metamorphic Property Gate ({args.meta_pairs:,} pairs)",
+            f"2/4 Metamorphic Property Gate ({args.meta_pairs:,} pairs)",
             [py, "-u", str(TOOLS_DIR / "metamorphic_vm_test.py"), "--iterations", str(args.meta_pairs),
              "--seed", str(args.seed), "--workers", str(args.workers)],
             REPO_DIR,
         ),
         (
-            f"3/3 Multi-Profile Differential Fuzzer ({args.fuzz_iters:,} iters)",
+            f"3/4 Multi-Profile Differential Fuzzer ({args.fuzz_iters:,} iters)",
             [py, "-u", str(TOOLS_DIR / "fuzz_vm_contracts.py"), "--iterations", str(args.fuzz_iters),
              "--seed", str(args.seed + 100000), "--profile", "all", "--workers", str(args.workers),
              "--shrink", "--coverage-report"],
