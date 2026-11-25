@@ -56,6 +56,7 @@ ALL_PROFILES = (
     "multilane",
     "negative",
     "validator",
+    "corpus",
 )
 
 TRANSCENDENTAL_OPCODES = frozenset({0x49, 0x4A, 0x4B})
@@ -2524,6 +2525,282 @@ class V11ContractFuzzer:
 
 
 # ---------------------------------------------------------------------------
+# Corpus-Based Mutational & Feedback-Guided Fuzzer
+# ---------------------------------------------------------------------------
+
+class V11CorpusMutator:
+    """Loads a seed corpus of .impas programs and evolves them via structured
+    instruction/operand/data mutations + splicing with behavioral-signature feedback."""
+
+    BOUNDARY_IMMS = (0, 1, 2, 3, 7, 8, 15, 16, 31, 32, 63, 64, 0xFFFF, 0x7FFF, 0xFFFFFFFF, 0x80000000)
+    BOUNDARY_F64 = (0.0, -0.0, 1.0, -1.0, 0.5, -0.5, 1e-17, -1e-17, 1e308, -1e308, None)
+    BOUNDARY_I64 = (0, 1, -1, 2, -2, 63, 64, 9223372036854775807, -9223372036854775808, None)
+
+    def __init__(
+        self,
+        isa: dict[str, Any],
+        asm: Any,
+        allowed_pillars: set[int],
+        corpus_dirs: list[Path],
+        max_corpus_size: int = 2048,
+        save_dir: Path | None = None,
+    ) -> None:
+        self.isa = isa
+        self.asm = asm
+        self.allowed_pillars = allowed_pillars
+        self.max_corpus_size = max_corpus_size
+        self.save_dir = save_dir
+        self.op_by_code: dict[int, dict[str, Any]] = {
+            op["code"]: op for op in isa["opcodes"] if op["code"] != 0xFF
+        }
+        self.entries: list[dict[str, Any]] = []
+        self.initial_count = 0
+        self.seen_sigs: set[tuple[Any, ...]] = set()
+        self.grown_count = 0
+
+        for cdir in corpus_dirs:
+            if not cdir.exists():
+                continue
+            for p in sorted(cdir.rglob("*.impas")):
+                try:
+                    src = p.read_text(encoding="utf-8")
+                    if "{{RAW_WORDS:" in src:
+                        continue
+                    prog = asm.assemble(src)
+                    if not prog.words:
+                        continue
+                    # Pillar filter: keep entry if all non-0xFF opcodes are in allowed_pillars
+                    if allowed_pillars != {1, 2, 3, 4, 5}:
+                        ok = True
+                        for w in prog.words:
+                            c = w & 0xFF
+                            if c != 0xFF and c in self.op_by_code:
+                                if self.op_by_code[c]["pillar"] not in allowed_pillars:
+                                    ok = False
+                                    break
+                        if not ok:
+                            continue
+                    self.entries.append({
+                        "name": p.name,
+                        "words": list(prog.words),
+                        "data_directives": prog.data_directives,
+                        "const_pool": prog.const_pool,
+                    })
+                except Exception:
+                    continue
+        self.initial_count = len(self.entries)
+
+    @staticmethod
+    def _instr_spans(words: list[int]) -> list[tuple[int, int]]:
+        """Partition words into (start_idx, length) logical instructions (1 or 2 words for FLAG_EXT)."""
+        spans: list[tuple[int, int]] = []
+        i = 0
+        n = len(words)
+        while i < n:
+            flags = (words[i] >> 12) & 0xF
+            if (flags & 0x8) != 0 and i + 1 < n and (words[i + 1] & 0xFF) == 0xFF:
+                spans.append((i, 2))
+                i += 2
+            else:
+                spans.append((i, 1))
+                i += 1
+        return spans
+
+    @staticmethod
+    def _encode(op: int, flags: int, subop: int, dst: int, s1: int, s2: int, s3: int, imm32: int) -> int:
+        b0 = op & 0xFF
+        b1 = ((flags & 0xF) << 4) | (subop & 0xF)
+        b2 = ((dst & 0xF) << 4) | (s1 & 0xF)
+        b3 = ((s2 & 0xF) << 4) | (s3 & 0xF)
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24) | ((imm32 & 0xFFFFFFFF) << 32)
+
+    @staticmethod
+    def _decode(w: int) -> tuple[int, int, int, int, int, int, int, int]:
+        op = w & 0xFF
+        subop = (w >> 8) & 0xF
+        flags = (w >> 12) & 0xF
+        s1 = (w >> 16) & 0xF
+        dst = (w >> 20) & 0xF
+        s3 = (w >> 24) & 0xF
+        s2 = (w >> 28) & 0xF
+        imm32 = (w >> 32) & 0xFFFFFFFF
+        return op, flags, subop, dst, s1, s2, s3, imm32
+
+    def _mutate_data(self, rng: random.Random, data_dirs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out = copy.deepcopy(data_dirs)
+        candidates = [d for d in out if d.get("directive") in (".param", ".node_attr", ".edge_attr")]
+        if not candidates:
+            return out
+        d = rng.choice(candidates)
+        kv = d.get("kv", {})
+        ty = str(kv.get("type", ""))
+        if "values" in kv and isinstance(kv["values"], list) and kv["values"]:
+            idx = rng.randrange(len(kv["values"]))
+            if "f64" in ty or "f32" in ty:
+                if not isinstance(kv["values"][idx], list):
+                    kv["values"][idx] = rng.choice(self.BOUNDARY_F64)
+            elif "i64" in ty or "u64" in ty:
+                kv["values"][idx] = rng.choice(self.BOUNDARY_I64)
+            elif "bool" in ty:
+                kv["values"][idx] = rng.choice([True, False, None])
+        elif "value" in kv:
+            if "f64" in ty or "f32" in ty:
+                kv["value"] = rng.choice(self.BOUNDARY_F64)
+            elif "i64" in ty or "u64" in ty:
+                kv["value"] = rng.choice(self.BOUNDARY_I64)
+        return out
+
+    def generate_mutant(self, seed: int) -> dict[str, Any]:
+        rng = random.Random(seed)
+        if not self.entries:
+            raise RuntimeError("Corpus is empty; cannot generate corpus mutant")
+        base = rng.choice(self.entries)
+        words = list(base["words"])
+        data_dirs = base["data_directives"]
+        const_pool = base["const_pool"]
+        mut_tags: list[str] = [f"base:{base['name']}"]
+
+        n_muts = rng.randint(1, 3)
+        for _ in range(n_muts):
+            spans = self._instr_spans(words)
+            if not spans:
+                break
+            kind = rng.choice([
+                "flip_subop",
+                "flip_flags",
+                "swap_regs",
+                "mutate_imm",
+                "duplicate_instr",
+                "delete_instr",
+                "swap_instrs",
+                "splice_corpus",
+                "mutate_data",
+            ])
+            mut_tags.append(kind)
+
+            if kind == "mutate_data":
+                data_dirs = self._mutate_data(rng, data_dirs)
+                continue
+
+            if kind == "splice_corpus" and len(self.entries) >= 2:
+                other = rng.choice(self.entries)
+                sp_a = spans
+                sp_b = self._instr_spans(other["words"])
+                if len(sp_a) >= 2 and len(sp_b) >= 2:
+                    cut_a = rng.randint(1, len(sp_a) - 1)
+                    cut_b = rng.randint(0, len(sp_b) - 1)
+                    end_a = sp_a[cut_a - 1][0] + sp_a[cut_a - 1][1]
+                    start_b = sp_b[cut_b][0]
+                    words = words[:end_a] + other["words"][start_b:]
+                    if len(words) > 160:
+                        words = words[:159] + [0]
+                continue
+
+            si = rng.randrange(len(spans))
+            pos, slen = spans[si]
+            op, flags, subop, dst, s1, s2, s3, imm32 = self._decode(words[pos])
+            meta = self.op_by_code.get(op)
+
+            if kind == "flip_subop" and meta is not None:
+                valid_subs = list(meta["subops"].keys())
+                if valid_subs:
+                    new_sub = rng.choice(valid_subs) if rng.random() < 0.9 else rng.randrange(16)
+                    # Keep FLAG_EXT consistency for LOAD_CONST (0x05)
+                    if op == 0x05 and ((new_sub >= 4) != ((flags & 0x8) != 0)):
+                        continue
+                    words[pos] = self._encode(op, flags, new_sub, dst, s1, s2, s3, imm32)
+            elif kind == "flip_flags" and meta is not None:
+                allowed = meta["allowed_flags"] & 0x7  # avoid breaking 2-word FLAG_EXT framing
+                if allowed:
+                    bit = rng.choice([b for b in (1, 2, 4) if allowed & b])
+                    words[pos] = self._encode(op, flags ^ bit, subop, dst, s1, s2, s3, imm32)
+            elif kind == "swap_regs":
+                which = rng.randrange(4)
+                new_reg = rng.choice([dst, s1, s2, s3, rng.randrange(16)])
+                if which == 0:
+                    dst = new_reg
+                elif which == 1:
+                    s1 = new_reg
+                elif which == 2:
+                    s2 = new_reg
+                else:
+                    s3 = new_reg
+                words[pos] = self._encode(op, flags, subop, dst, s1, s2, s3, imm32)
+            elif kind == "mutate_imm":
+                if op not in (0x0F, 0x10, 0x11, 0x12, 0x35, 0x36, 0x38):
+                    imm_new = rng.choice(self.BOUNDARY_IMMS)
+                    words[pos] = self._encode(op, flags, subop, dst, s1, s2, s3, imm_new)
+            elif kind == "duplicate_instr" and len(words) < 140:
+                if op not in (0x00, 0x35, 0x36, 0x38):
+                    words = words[:pos] + words[pos : pos + slen] + words[pos:]
+            elif kind == "delete_instr" and len(spans) > 2:
+                if op not in (0x00, 0x35, 0x36, 0x38):
+                    words = words[:pos] + words[pos + slen :]
+            elif kind == "swap_instrs" and si + 1 < len(spans):
+                pos2, slen2 = spans[si + 1]
+                op2 = words[pos2] & 0xFF
+                if op not in (0x00, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x35, 0x36, 0x38) and op2 not in (
+                    0x00, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x35, 0x36, 0x38
+                ):
+                    seg1 = words[pos : pos + slen]
+                    seg2 = words[pos2 : pos2 + slen2]
+                    words = words[:pos] + seg2 + seg1 + words[pos2 + slen2 :]
+
+        return {
+            "seed": seed,
+            "profile": "corpus",
+            "is_raw_words": True,
+            "mut_tags": mut_tags,
+            "data_directives": data_dirs,
+            "const_pool": const_pool,
+            "words": words,
+            "source": None,
+            "max_steps": 10_000,
+        }
+
+    def record_feedback(self, case: dict[str, Any], ref_res: dict[str, Any]) -> bool:
+        """Promote mutant into the live corpus if it hits a new behavioral signature."""
+        status = str(ref_res.get("status", "UNKNOWN"))
+        flags_raw = ref_res.get("flags", {}).get("raw", 0) if isinstance(ref_res.get("flags"), dict) else 0
+        words = case["words"]
+        # Compact opcode bigram fingerprint (top 4 distinct adjacent opcode pairs)
+        bigrams: set[tuple[int, int]] = set()
+        prev_op = -1
+        for w in words:
+            op = w & 0xFF
+            if op == 0xFF:
+                continue
+            if prev_op >= 0:
+                bigrams.add((prev_op, op))
+            prev_op = op
+        sig = (status, flags_raw, len(ref_res.get("outputs", {})), frozenset(sorted(bigrams)[:6]))
+        if sig in self.seen_sigs:
+            return False
+        self.seen_sigs.add(sig)
+        if len(self.entries) < self.max_corpus_size and status != "IMPULSE_VM_ERR_VALIDATION_FAILED":
+            entry = {
+                "name": f"mut_s{case['seed']}",
+                "words": list(words),
+                "data_directives": case["data_directives"],
+                "const_pool": case["const_pool"],
+            }
+            self.entries.append(entry)
+            self.grown_count += 1
+            if self.save_dir is not None:
+                self.save_dir.mkdir(parents=True, exist_ok=True)
+                raw_hex = ", ".join(f"0x{w:016X}" for w in words)
+                out_p = self.save_dir / f"corpus_seed{case['seed']}_{status}.impas"
+                out_p.write_text(
+                    f"; CORPUS ENTRY (seed={case['seed']}, status={status}, flags={flags_raw})\n"
+                    f"; {{{{RAW_WORDS: {raw_hex}}}}}\n"
+                    f"; Mutations: {', '.join(case.get('mut_tags', []))}\n",
+                    encoding="utf-8",
+                )
+            return True
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Consensus Checking & Delta-Debugging Shrinker
 # ---------------------------------------------------------------------------
 
@@ -2726,6 +3003,7 @@ def dump_finding(
 # ---------------------------------------------------------------------------
 
 _W_FUZZER: V11ContractFuzzer | None = None
+_W_CORPUS: V11CorpusMutator | None = None
 _W_CLIENTS: dict[str, BatchEngineClient] = {}
 _W_PROFILES: list[str] = []
 _W_ASM: Any = None
@@ -2734,7 +3012,7 @@ _W_CONFIG: dict[str, Any] = {}
 
 
 def _worker_init(cfg: dict[str, Any]) -> None:
-    global _W_FUZZER, _W_CLIENTS, _W_PROFILES, _W_ASM, _W_MODS, _W_CONFIG
+    global _W_FUZZER, _W_CORPUS, _W_CLIENTS, _W_PROFILES, _W_ASM, _W_MODS, _W_CONFIG
     _W_CONFIG = cfg
     spec_dir = Path(cfg["spec_dir"])
     v11_isa_loader, impas_v11_assembler = _import_spec_modules(spec_dir)
@@ -2742,6 +3020,19 @@ def _worker_init(cfg: dict[str, Any]) -> None:
     isa = v11_isa_loader.load_isa(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
     _W_ASM = impas_v11_assembler.ImpAsmV11(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
     _W_FUZZER = V11ContractFuzzer(isa, _W_ASM, set(cfg["pillars"]))
+    corpus_dirs = [Path(d) for d in cfg.get("corpus_dirs", [])]
+    if corpus_dirs:
+        save_dir = Path(cfg["corpus_save_dir"]) if cfg.get("corpus_save_dir") else None
+        _W_CORPUS = V11CorpusMutator(
+            isa,
+            _W_ASM,
+            set(cfg["pillars"]),
+            corpus_dirs,
+            max_corpus_size=cfg.get("corpus_max_size", 2048),
+            save_dir=save_dir,
+        )
+    else:
+        _W_CORPUS = None
     _W_PROFILES = cfg["geom_profiles"]
     _W_CLIENTS = {name: BatchEngineClient(cmd, name) for name, cmd in cfg["engine_cmds"].items()}
 
@@ -2760,14 +3051,23 @@ def _worker_run_chunk(seeds: list[int]) -> dict[str, Any]:
     op_cov: Counter[int] = Counter()
     subop_cov: Counter[tuple[int, int]] = Counter()
     findings: list[dict[str, Any]] = []
+    corpus_grown = 0
 
     ref_engine = next(iter(_W_CLIENTS.keys()))
 
     for seed in seeds:
-        prof = _W_FUZZER.pick_profile(seed, req_profile)
+        if req_profile == "corpus":
+            prof = "corpus"
+        elif req_profile == "all" and _W_CORPUS is not None and (seed % 5 == 0):
+            prof = "corpus"
+        else:
+            prof = _W_FUZZER.pick_profile(seed, req_profile)
         profile_counts[prof] += 1
         try:
-            if prof == "validator":
+            if prof == "corpus":
+                assert _W_CORPUS is not None
+                case = _W_CORPUS.generate_mutant(seed)
+            elif prof == "validator":
                 case = _W_FUZZER.generate_validator_case(
                     seed,
                     max_instrs,
@@ -2784,19 +3084,23 @@ def _worker_run_chunk(seeds: list[int]) -> dict[str, Any]:
                 findings.append({"seed": seed, "profile": prof, "error": f"GEN/ASM ERROR: {exc}", "path": None})
             continue
 
-        # Record coverage for non-validator programs
-        if not case["is_raw_words"]:
+        # Record coverage for non-validator programs (including corpus mutants)
+        if prof != "validator":
             words = case["words"]
             i = 0
             while i < len(words):
                 code, flags, subop, *_ = impas_v11_assembler.decode_word_fields(words[i])
-                op_cov[code] += 1
-                subop_cov[(code, subop)] += 1
+                if code != 0xFF:
+                    op_cov[code] += 1
+                    subop_cov[(code, subop)] += 1
                 i += 2 if (flags & impas_v11_assembler.FLAG_EXT) and i + 1 < len(words) else 1
 
         err, results = evaluate_case(case, _W_CLIENTS, _W_PROFILES)
         ref_res = results[ref_engine].get("P0") or next(iter(results[ref_engine].values()))
         status_counts[str(ref_res.get("status", "UNKNOWN"))] += 1
+        if prof == "corpus" and _W_CORPUS is not None:
+            if _W_CORPUS.record_feedback(case, ref_res):
+                corpus_grown += 1
 
         if err is not None:
             if do_shrink:
@@ -2817,6 +3121,8 @@ def _worker_run_chunk(seeds: list[int]) -> dict[str, Any]:
         "op_cov": dict(op_cov),
         "subop_cov": {f"{k[0]}:{k[1]}": v for k, v in subop_cov.items()},
         "findings": findings,
+        "corpus_initial": _W_CORPUS.initial_count if _W_CORPUS is not None else 0,
+        "corpus_grown": corpus_grown,
     }
 
 
@@ -2924,6 +3230,15 @@ def main() -> int:
     parser.add_argument("--shrink", action="store_true", help="Delta-debug shrink any divergence")
     parser.add_argument("--coverage-report", action="store_true", help="Print ISA opcode/subop coverage report")
     parser.add_argument("--dump-dir", type=Path, default=TOOLS_DIR / "fuzz_findings_v11", help="Directory for finding repros")
+    parser.add_argument(
+        "--corpus-dir",
+        type=str,
+        action="append",
+        default=[],
+        help="Seed corpus directory of .impas files (repeatable; defaults to <spec>/test-vectors/vm-impas-v11 when --profile corpus)",
+    )
+    parser.add_argument("--corpus-save-dir", type=Path, default=None, help="Directory to persist newly discovered corpus entries")
+    parser.add_argument("--corpus-max-size", type=int, default=2048, help="Maximum in-memory corpus entries per worker")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -2934,11 +3249,20 @@ def main() -> int:
     geom_profiles = [p.strip() for p in args.profiles.split(",") if p.strip()]
     engine_cmds = build_engine_cmds(args)
 
+    corpus_dirs: list[str] = []
+    for raw_d in args.corpus_dir:
+        for part in raw_d.split(","):
+            if part.strip():
+                corpus_dirs.append(str(Path(part.strip()).resolve()))
+    if args.profile == "corpus" and not corpus_dirs:
+        corpus_dirs.append(str((spec_dir / "test-vectors" / "vm-impas-v11").resolve()))
+
     print(
         f"{BOLD}ImpulseVM v0.11.0 Differential Fuzzer{RESET} | "
         f"engines={','.join(engine_cmds.keys())} | pillars={pillars} | "
         f"profile={args.profile} | geom={','.join(geom_profiles)} | "
         f"iters={args.iterations} | seed={args.seed} | workers={args.workers}"
+        + (f" | corpus_dirs={len(corpus_dirs)}" if corpus_dirs else "")
     )
 
     cfg = {
@@ -2951,6 +3275,9 @@ def main() -> int:
         "max_errors": args.max_errors,
         "shrink": args.shrink,
         "dump_dir": str(args.dump_dir),
+        "corpus_dirs": corpus_dirs,
+        "corpus_save_dir": str(args.corpus_save_dir) if args.corpus_save_dir else None,
+        "corpus_max_size": args.corpus_max_size,
     }
 
     all_seeds = [args.seed + i for i in range(args.iterations)]
@@ -2959,6 +3286,8 @@ def main() -> int:
     t0 = time.perf_counter()
     total_exec = 0
     total_asm_err = 0
+    total_corpus_grown = 0
+    corpus_initial = 0
     status_counts: Counter[str] = Counter()
     profile_counts: Counter[str] = Counter()
     op_cov: Counter[int] = Counter()
@@ -2972,6 +3301,8 @@ def main() -> int:
                 res = _worker_run_chunk(ch)
                 total_exec += res["executed"]
                 total_asm_err += res["asm_errors"]
+                corpus_initial = max(corpus_initial, res.get("corpus_initial", 0))
+                total_corpus_grown += res.get("corpus_grown", 0)
                 status_counts.update(res["status_counts"])
                 profile_counts.update(res["profile_counts"])
                 op_cov.update(res["op_cov"])
@@ -2988,6 +3319,8 @@ def main() -> int:
             for res in pool.imap_unordered(_worker_run_chunk, chunks):
                 total_exec += res["executed"]
                 total_asm_err += res["asm_errors"]
+                corpus_initial = max(corpus_initial, res.get("corpus_initial", 0))
+                total_corpus_grown += res.get("corpus_grown", 0)
                 status_counts.update(res["status_counts"])
                 profile_counts.update(res["profile_counts"])
                 op_cov.update(res["op_cov"])
@@ -3006,6 +3339,8 @@ def main() -> int:
         f"\nCompleted {total_exec}/{args.iterations} fixtures in {dt:.2f}s "
         f"({rate:.1f} iters/s, asm_errors={total_asm_err}, findings={len(findings)})"
     )
+    if corpus_dirs:
+        print(f"Corpus: initial={corpus_initial} seeds, promoted=+{total_corpus_grown} new behavioral signatures")
     print(f"Profiles: {dict(sorted(profile_counts.items()))}")
     print(f"Statuses: {dict(status_counts.most_common())}")
 
