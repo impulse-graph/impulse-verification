@@ -3,6 +3,7 @@
 *.impb_data
 *.imps
 datasets/
+tools/fuzz_findings_v11/
 __pycache__/
 *.py[cod]
 *.log
