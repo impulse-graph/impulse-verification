@@ -77,7 +77,7 @@ def main():
         (
             f"2/4 Metamorphic Property Gate ({args.meta_pairs:,} pairs)",
             [py, "-u", str(TOOLS_DIR / "metamorphic_vm_test.py"), "--iterations", str(args.meta_pairs),
-             "--seed", str(args.seed), "--workers", str(args.workers)],
+             "--seed", str(args.seed)],
             REPO_DIR,
         ),
         (
@@ -91,11 +91,13 @@ def main():
 
     if args.corpus_iters > 0:
         corpus_cmd = [
-            py, "-u", str(TOOLS_DIR / "mutate_corpus_fuzzer.py"),
+            py, "-u", str(TOOLS_DIR / "fuzz_vm_contracts.py"),
+            "--profile", "corpus",
             "--iterations", str(args.corpus_iters),
             "--seed", str(args.seed + 200000),
             "--workers", str(args.workers),
             "--shrink",
+            "--coverage-report",
         ]
         if args.spec_dir:
             corpus_cmd.extend(["--spec-dir", args.spec_dir])
