@@ -29,7 +29,7 @@ REPO_DIR = TOOLS_DIR.parent
 ROOT_DIR = REPO_DIR.parent
 sys.path.insert(0, str(TOOLS_DIR))
 
-from fuzz_vm_contracts_v11 import (
+from fuzz_vm_contracts import (
     BatchEngineClient,
     _import_spec_modules,
     discover_default_java_cmd,
