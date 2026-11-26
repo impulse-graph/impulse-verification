@@ -71,7 +71,7 @@ def main():
         ),
         (
             "1/4 Spec Compliance Suite",
-            [py, "-u", str(spec_dir / "tools" / "run_vm_asm_suite.py"), "--all-engines"],
+            [py, "-u", str(spec_dir / "tools" / "run_vm_asm_suite.py"), "--check-coverage"],
             REPO_DIR,
         ),
         (
