@@ -51,7 +51,10 @@ def main():
     parser.add_argument("--with-unit-tests", action="store_true", help="Also run C++ ctest, Java mvn test, OCaml dune runtest")
     args = parser.parse_args()
 
-    core_cpp = ROOT_DIR / "impulse-graph-core" / "impulse-cpp"
+    spec_dir = Path(args.spec_dir) if args.spec_dir else (ROOT_DIR / "impulse-graph-spec")
+    core_cpp = ROOT_DIR / ".worktrees" / "v11-m3" / "impulse-graph-core" / "impulse-cpp"
+    if not core_cpp.exists():
+        core_cpp = ROOT_DIR / "impulse-graph-core" / "impulse-cpp"
     ext = "dylib" if sys.platform == "darwin" else "so"
     env = os.environ.copy()
     env.setdefault("IMPULSE_LIB_PATH_ON", str(core_cpp / "build_on" / f"libimpulse_graph.{ext}"))
@@ -67,8 +70,8 @@ def main():
             REPO_DIR,
         ),
         (
-            "1/4 Four-Way Spec Compliance",
-            [py, "-u", str(TOOLS_DIR / "four_way_validation.py"), "-q", "--workers", str(args.workers)],
+            "1/4 Spec Compliance Suite",
+            [py, "-u", str(spec_dir / "tools" / "run_vm_asm_suite.py"), "--all-engines"],
             REPO_DIR,
         ),
         (
@@ -101,7 +104,7 @@ def main():
     if args.with_unit_tests:
         stages.extend([
             ("Unit: OCaml dune runtest", ["dune", "runtest"], ROOT_DIR / "impulse-ocaml"),
-            ("Unit: C++ ctest (build_on)", ["ctest", "--output-on-failure", "-R", "vm_mcdc|v0_10_1"], core_cpp / "build_on"),
+            ("Unit: C++ ctest (build_on)", ["ctest", "--output-on-failure"], core_cpp / "build_on"),
             ("Unit: Java mvn impulse-vm test", ["mvn", "-q", "-pl", "impulse-vm", "test"], ROOT_DIR / "impulse-graph-java"),
         ])
 

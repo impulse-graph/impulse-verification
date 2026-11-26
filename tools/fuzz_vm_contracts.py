@@ -85,10 +85,10 @@ def _import_spec_modules(spec_dir: Path) -> tuple[Any, Any]:
     spec_tools = str(spec_dir / "tools")
     if spec_tools not in sys.path:
         sys.path.insert(0, spec_tools)
-    import v11_isa_loader  # type: ignore
-    import impas_v11_assembler  # type: ignore
+    import isa_loader  # type: ignore
+    import impas_assembler  # type: ignore
 
-    return v11_isa_loader, impas_v11_assembler
+    return isa_loader, impas_assembler
 
 
 def discover_default_ocaml_bin() -> Path:

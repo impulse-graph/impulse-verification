@@ -64,7 +64,9 @@ def main() -> int:
     violations: list[str] = []
 
     # 1. Java VM runtime rules (no topology synthesis, no heap-array topology derefs)
-    java_vm_dir = java_root / "impulse-vm" / "src" / "main" / "java" / "org" / "impulsegraph" / "vm" / "v11"
+    java_vm_dir = java_root / "impulse-vm" / "src" / "main" / "java" / "org" / "impulsegraph" / "vm"
+    if not java_vm_dir.exists():
+        violations.append(f"[MISSING_TARGET] Expected Java VM directory not found: {java_vm_dir}")
     java_vm_rules = [
         (
             "NO_TOPOLOGY_SYNTHESIS",
@@ -83,6 +85,8 @@ def main() -> int:
 
     # 2. Java Snapshot Adapter rules (zero-copy mmap-and-go, no full-column copies or ID fabrication)
     adapter_file = java_vm_dir / "ImpulseSnapshotAdapter.java"
+    if not adapter_file.exists():
+        violations.append(f"[MISSING_TARGET] Expected Java adapter file not found: {adapter_file}")
     adapter_rules = [
         (
             "NO_HEAP_TOPOLOGY_COPY",
@@ -107,8 +111,10 @@ def main() -> int:
     ]
     violations.extend(scan_file(adapter_file, adapter_rules))
 
-    # 3. Java V11SnapshotView rules (no heap topology arrays on RelView)
-    view_file = java_vm_dir / "V11SnapshotView.java"
+    # 3. Java ImpulseSnapshotView rules (no heap topology arrays on RelView)
+    view_file = java_vm_dir / "ImpulseSnapshotView.java"
+    if not view_file.exists():
+        violations.append(f"[MISSING_TARGET] Expected Java view file not found: {view_file}")
     view_rules = [
         (
             "SINGLE_OFFHEAP_RELVIEW",
@@ -118,9 +124,11 @@ def main() -> int:
     ]
     violations.extend(scan_file(view_file, view_rules))
 
-    # 4. C++ VM dispatch rules (no CSR/CSC arena copy from mmap_ptr, no topology synthesis)
-    cpp_v11_dir = cpp_root / "src" / "v11"
-    cpp_dispatch = cpp_v11_dir / "vm_dispatch.cpp"
+    # 4. C++ VM dispatch & opcode rules (no CSR/CSC arena copy from mmap_ptr, no topology synthesis)
+    cpp_vm_dir = cpp_root / "src" / "vm"
+    cpp_dispatch = cpp_vm_dir / "vm_dispatch.cpp"
+    if not cpp_dispatch.exists():
+        violations.append(f"[MISSING_TARGET] Expected C++ dispatch file not found: {cpp_dispatch}")
     cpp_rules = [
         (
             "NO_CPP_CSR_ARENA_COPY",
@@ -130,14 +138,18 @@ def main() -> int:
     ]
     violations.extend(scan_file(cpp_dispatch, cpp_rules))
 
-    # 5. Java V11Workspace.reset() strTable cleanup check
+    # 5. Java ImpulseWorkspace.reset() strTable cleanup check
     ws_file = java_vm_dir / "ImpulseWorkspace.java"
-    if ws_file.exists():
+    if not ws_file.exists():
+        violations.append(f"[MISSING_TARGET] Expected Java workspace file not found: {ws_file}")
+    else:
         ws_text = ws_file.read_text(encoding="utf-8", errors="replace")
-        m = re.search(r"public void reset\(\)\s*\{(.*?)\n    \}", ws_text, re.DOTALL)
+        m = re.search(r"public void reset\(\)\s*\{(.*?)\n\t\}", ws_text, re.DOTALL)
+        if not m:
+            m = re.search(r"public void reset\(\)\s*\{(.*?)\n    \}", ws_text, re.DOTALL)
         if m and "strTable.clear()" not in m.group(1):
             violations.append(
-                f"[WORKSPACE_RESET_LEAK] {ws_file}: V11Workspace.reset() must clear strTable and reset nextStrHandle."
+                f"[WORKSPACE_RESET_LEAK] {ws_file}: ImpulseWorkspace.reset() must clear strTable and reset nextStrHandle."
             )
 
     if violations:
