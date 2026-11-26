@@ -82,7 +82,7 @@ def main() -> int:
             violations.extend(scan_file(f, java_vm_rules))
 
     # 2. Java Snapshot Adapter rules (zero-copy mmap-and-go, no full-column copies or ID fabrication)
-    adapter_file = java_vm_dir / "V11SnapshotAdapter.java"
+    adapter_file = java_vm_dir / "ImpulseSnapshotAdapter.java"
     adapter_rules = [
         (
             "NO_HEAP_TOPOLOGY_COPY",
@@ -120,7 +120,7 @@ def main() -> int:
 
     # 4. C++ VM dispatch rules (no CSR/CSC arena copy from mmap_ptr, no topology synthesis)
     cpp_v11_dir = cpp_root / "src" / "v11"
-    cpp_dispatch = cpp_v11_dir / "v11_vm_dispatch.cpp"
+    cpp_dispatch = cpp_v11_dir / "vm_dispatch.cpp"
     cpp_rules = [
         (
             "NO_CPP_CSR_ARENA_COPY",
@@ -131,7 +131,7 @@ def main() -> int:
     violations.extend(scan_file(cpp_dispatch, cpp_rules))
 
     # 5. Java V11Workspace.reset() strTable cleanup check
-    ws_file = java_vm_dir / "V11Workspace.java"
+    ws_file = java_vm_dir / "ImpulseWorkspace.java"
     if ws_file.exists():
         ws_text = ws_file.read_text(encoding="utf-8", errors="replace")
         m = re.search(r"public void reset\(\)\s*\{(.*?)\n    \}", ws_text, re.DOTALL)

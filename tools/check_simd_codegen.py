@@ -8,7 +8,7 @@ for the `impulse::vm::v11::simd::*` kernels across:
   - x86_64 (Linux GCC/Clang, macOS cross-clang, Windows MSVC): AVX2/FMA `vaddpd`, `vsubpd`, `vmulpd`, `vdivpd`, `vsqrtpd`, `vcmppd`, `vmovmskpd`
 
 Usage:
-  python3 check_simd_codegen.py --obj <path/to/v11_vm_dispatch.cpp.o> [--arch arm64|x86_64]
+  python3 check_simd_codegen.py --obj <path/to/vm_dispatch.cpp.o> [--arch arm64|x86_64]
   python3 check_simd_codegen.py --cross-x64-compile <path/to/v11_simd_kernels.hpp>
 """
 
