@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fuzz_vm_contracts_v11.py — ImpulseVM v0.11.0 Contract-Guided & Validator Differential Fuzzer.
+fuzz_vm_contracts.py — ImpulseVM v0.11.0 Contract-Guided & Validator Differential Fuzzer.
 
 Drives generation directly from the frozen v0.11 ISA (`v0.11-refactor/isa_v0_11.yaml` via
 `v11_isa_loader.load_isa()`) and assembles programs via `impas_v11_assembler.ImpAsmV11`
@@ -124,7 +124,7 @@ def discover_default_java_cmd() -> list[str]:
         "jdk.incubator.vector",
         "-cp",
         cp,
-        "org.impulsegraph.vm.v11.V11FixtureBatchMain",
+        "org.impulsegraph.vm.VmFixtureBatchMain",
     ]
 
 
@@ -3154,7 +3154,7 @@ def build_engine_cmds(args: argparse.Namespace) -> dict[str, list[str]]:
             bin_path = Path(args.ocaml_bin) if args.ocaml_bin else discover_default_ocaml_bin()
             if not bin_path.exists():
                 raise FileNotFoundError(f"OCaml binary not found: {bin_path}")
-            cmds["ocaml"] = [str(bin_path), "--v11-fixture-batch"]
+            cmds["ocaml"] = [str(bin_path), "--vm-fixture-batch"]
         elif eng == "java":
             cmds["java"] = shlex.split(args.java_cmd) if args.java_cmd else discover_default_java_cmd()
         elif eng == "cpp_on":
@@ -3217,7 +3217,7 @@ def main() -> int:
     )
     parser.add_argument("--engines", type=str, default="ocaml,java", help="Comma-separated engines (ocaml,java,cpp_on,cpp_off)")
     parser.add_argument("--ocaml-bin", type=Path, default=None, help="Path to impulse-ocaml binary")
-    parser.add_argument("--java-cmd", type=str, default=None, help="Command line for Java V11FixtureBatchMain")
+    parser.add_argument("--java-cmd", type=str, default=None, help="Command line for Java VmFixtureBatchMain")
     parser.add_argument("--cpp-on-cmd", type=str, default=None, help="Command line for C++ (opt ON) batch runner")
     parser.add_argument("--cpp-off-cmd", type=str, default=None, help="Command line for C++ (opt OFF) batch runner")
     parser.add_argument("--profiles", type=str, default="P0", help="Geometry profiles (e.g. P0 or P0,P1,P2,P3)")
@@ -3235,7 +3235,7 @@ def main() -> int:
         type=str,
         action="append",
         default=[],
-        help="Seed corpus directory of .impas files (repeatable; defaults to <spec>/test-vectors/vm-impas-v11 when --profile corpus)",
+        help="Seed corpus directory of .impas files (repeatable; defaults to <spec>/test-vectors/vm-impas when --profile corpus)",
     )
     parser.add_argument("--corpus-save-dir", type=Path, default=None, help="Directory to persist newly discovered corpus entries")
     parser.add_argument("--corpus-max-size", type=int, default=2048, help="Maximum in-memory corpus entries per worker")
@@ -3255,7 +3255,7 @@ def main() -> int:
             if part.strip():
                 corpus_dirs.append(str(Path(part.strip()).resolve()))
     if args.profile == "corpus" and not corpus_dirs:
-        corpus_dirs.append(str((spec_dir / "test-vectors" / "vm-impas-v11").resolve()))
+        corpus_dirs.append(str((spec_dir / "test-vectors" / "vm-impas").resolve()))
 
     print(
         f"{BOLD}ImpulseVM v0.11.0 Differential Fuzzer{RESET} | "

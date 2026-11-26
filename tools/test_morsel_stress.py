@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-test_v11_morsel_stress.py — ImpulseVM v0.11.0 Dedicated Morsel / Shader Stress Suite
+test_morsel_stress.py — ImpulseVM v0.11.0 Dedicated Morsel / Shader Stress Suite
 
 Stresses OP_WALK_MORSEL (0x35), OP_FILTER_MORSEL (0x36), OP_MORSEL_COMMIT (0x37),
 and OP_MORSEL_END (0x38) across:
@@ -154,14 +154,14 @@ def main() -> int:
     clients: dict[str, BatchEngineClient] = {}
     for name in engine_names:
         if name == "ocaml":
-            clients[name] = BatchEngineClient([str(discover_default_ocaml_bin()), "--v11-fixture-batch"], "ocaml")
+            clients[name] = BatchEngineClient([str(discover_default_ocaml_bin()), "--vm-fixture-batch"], "ocaml")
         elif name == "java":
             clients[name] = BatchEngineClient(discover_default_java_cmd(), "java")
         elif name == "cpp_on":
-            b = args.cpp_on_bin or (ROOT_DIR / ".worktrees/v11-m3/impulse-graph-core/impulse-cpp/build_on/v11_fixture_batch_runner")
+            b = args.cpp_on_bin or (ROOT_DIR / ".worktrees/v11-m3/impulse-graph-core/impulse-cpp/build_on/vm_fixture_batch_runner")
             clients[name] = BatchEngineClient([str(b)], "cpp_on")
         elif name == "cpp_off":
-            b = args.cpp_off_bin or (ROOT_DIR / ".worktrees/v11-m3/impulse-graph-core/impulse-cpp/build_off/v11_fixture_batch_runner")
+            b = args.cpp_off_bin or (ROOT_DIR / ".worktrees/v11-m3/impulse-graph-core/impulse-cpp/build_off/vm_fixture_batch_runner")
             clients[name] = BatchEngineClient([str(b)], "cpp_off")
         else:
             raise ValueError(f"Unknown engine: {name}")
