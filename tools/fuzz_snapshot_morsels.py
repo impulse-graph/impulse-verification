@@ -56,7 +56,6 @@ def compare_results(results: dict[str, dict[str, Any]]) -> str | None:
 # ---------------------------------------------------------------------------
 
 class DomainEntry(ctypes.Structure):
-    _pack_ = 1
     _fields_ = [
         ("domain_id", ctypes.c_uint16),
         ("key_type", ctypes.c_uint8),
@@ -70,7 +69,6 @@ class DomainEntry(ctypes.Structure):
 
 
 class RelationEntry(ctypes.Structure):
-    _pack_ = 1
     _fields_ = [
         ("relation_id", ctypes.c_uint16),
         ("src_domain_id", ctypes.c_uint16),
@@ -475,12 +473,13 @@ def render_impas(gene: MorselGene, schema: SnapshotSchema) -> str:
 
     if gene.kind == "ml_morsel":
         lines.append("  LOAD_PARAM.vec V0, param=0, type=u64")
+        if gene.attr_id is not None:
+            lines.append("  LOAD_PARAM.scalar R5, param=1")
         init_sub = "force_w64" if gene.force_w64 else "auto_width"
         lines.append(f"  LANE_INIT_SEEDS.{init_sub} F0, V0, dom={in_dom}")
         lines.append(f"  WALK_MORSEL.{gene.dir_sub} F0, rel={gene.rel_id}")
         if gene.attr_id is not None:
             lines.append(f"    GATHER_EDGE_ATTR.vec M4, M2, rel={gene.rel_id}, attr={gene.attr_id}")
-            lines.append("    LOAD_PARAM.scalar R5, param=1")
             lines.append(f"    VEC_CMP.{gene.cmp_op}.scalar M5, M4, R5")
             lines.append("    SET_CONVERT.b2f MF1, M5")
             if gene.use_jempty:
