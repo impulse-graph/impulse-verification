@@ -10,6 +10,16 @@ Related: [WEBSITE_CODE_SAMPLE_VERIFICATION.md](WEBSITE_CODE_SAMPLE_VERIFICATION.
 
 ## Part 1 — Formal Definition of the "Full Gamut" Test Suite
 
+All tiers below are formally cataloged in [`catalog.toml`](../catalog.toml) and invoked via the unified runner:
+
+```bash
+# Run the complete pre-release gamut (Tier 1..4 + 20k fuzz budgets + perf regression gate)
+python3 verify.py run --gamut full-gamut
+
+# Verify exact PASS/FAIL/SKIP status and confirm 0 stale/dirty repos before tagging
+python3 verify.py status --gamut full-gamut
+```
+
 Run all applicable tiers against the exact `release/0.X.x` branch (with freshly rebuilt `build_on`, `build_off`, `~/.m2` snapshots, and local wheels/binaries) before tagging.
 
 ### Tier 1 — Native Core & Polyglot Bindings (`impulse-graph-core`)
@@ -41,7 +51,7 @@ cmake --build impulse-graph-core/impulse-cpp/build_off --target impulse_graph -j
 
 | Check | Command | Pass Criterion |
 | :--- | :--- | :--- |
-| **Four-Way Polyglot Validation** | `python3 tools/four_way_validation.py` | **531 / 531 PASS** (0 mismatches, 0 skipped across C++ ON, C++ OFF, Java 25, OCaml Oracle). |
+| **Four-Way Polyglot Spec Compliance** | `python3 verify.py run --id parity.four_way_spec` (`impulse-graph-spec/tools/run_vm_asm_suite.py --check-coverage`) | **100% PASS & 100% opcode/subop coverage** (0 mismatches, 0 skipped across C++ ON, C++ OFF, Java 25, OCaml Oracle). |
 | **Contract-Guided Differential Fuzzer** | `IMPULSE_LIB_PATH_ON=.../build_on/libimpulse_graph.dylib IMPULSE_LIB_PATH_OFF=.../build_off/libimpulse_graph.dylib python3 tools/fuzz_vm_contracts.py --iterations 20000 --seed <seed>` | **20,000 / 20,000 consensus matches**, 0 divergences, 0 errors. *(Use `--iterations 500` for PR smoke checks; `--iterations 20000` for release sign-off.)* |
 | **50-Seed Snapshot Roundtrip** | `python3 tools/test_seeded_roundtrip_50.py` | **50 / 50 PASS** (multi-domain CSV → `.imps` → inspect roundtrip identical). |
 
