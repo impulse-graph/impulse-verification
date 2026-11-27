@@ -237,7 +237,7 @@ def cmd_sync(args: argparse.Namespace, cat, ws) -> int:
 
 
 def cmd_index(args: argparse.Namespace, cat, ws) -> int:
-    code_data = build_code_index(ws, run_scip=args.run_scip)
+    code_data = build_code_index(ws, run_scip=args.run_scip, use_docker=args.docker)
     res = build_verification_imps(cat, ws, code_data=code_data, validate=not args.no_validate)
     if args.json:
         print(
@@ -509,7 +509,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
 
     sp = sub.add_parser("index", help="Index static call chains (SCIP-first + fallback) and rebuild verification.imps")
-    sp.add_argument("--run-scip", action="store_true", help="Invoke installed SCIP indexers before ingesting")
+    sp.add_argument("--run-scip", action="store_true", help="Invoke SCIP indexers before ingesting")
+    sp.add_argument("--docker", action="store_true", help="Run SCIP indexers inside docker/Dockerfile.scip container")
     sp.add_argument("--no-validate", action="store_true")
     sp.add_argument("--json", action="store_true")
 

@@ -51,9 +51,11 @@ python3 verify.py run --gamut veryquick --override java=../.worktrees/my-fix/imp
 
 # Index static call chains (SCIP-first + fallback) & query datasets/verification.imps natively
 python3 verify.py index
+python3 verify.py index --run-scip --docker   # Run scip-clang/scip-java/rust-analyzer/scip-python in Docker
 python3 verify.py opcode OP_INDEX_SCAN
 python3 verify.py callers execIndexScan --depth 3
 python3 verify.py where impulse_stmt_execute
+python3 verify.py matrix domain_attribute     # Cross-language FFI & JVM DSL parity matrix
 python3 verify.py impacted --diff
 python3 verify.py gaps
 python3 verify.py audit-invariants

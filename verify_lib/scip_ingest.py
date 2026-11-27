@@ -458,7 +458,7 @@ def run_available_scip_indexers(ws_repos: dict[str, Path], scip_out_dir: Path) -
     if shutil.which("scip-python") and ws_repos["verification"].is_dir():
         out = scip_out_dir / "verification_py.scip"
         res = subprocess.run(
-            ["scip-python", "index", ".", "--output", str(out)],
+            ["scip-python", "index", ".", "--project-name", "impulse-verification", "--output", str(out)],
             cwd=ws_repos["verification"],
             capture_output=True,
             text=True,
@@ -468,3 +468,49 @@ def run_available_scip_indexers(ws_repos: dict[str, Path], scip_out_dir: Path) -
         status["verification_py"] = "skipped (scip-python not on PATH)"
 
     return status
+
+
+def run_docker_scip_indexers(
+    ws_root: Path,
+    verification_dir: Path,
+    scip_out_dir: Path,
+    *,
+    image: str = "impulse-scip-indexer:latest",
+) -> dict[str, str]:
+    """Build (if needed) and run docker/Dockerfile.scip to generate *.scip indexes into scip_out_dir."""
+    if not shutil.which("docker"):
+        return {"docker": "skipped (docker not on PATH)"}
+
+    scip_out_dir.mkdir(parents=True, exist_ok=True)
+    dockerfile = verification_dir / "docker" / "Dockerfile.scip"
+    if not dockerfile.is_file():
+        return {"docker": f"missing {dockerfile}"}
+
+    # Build image if not already present locally
+    inspect = subprocess.run(["docker", "image", "inspect", image], capture_output=True)
+    if inspect.returncode != 0:
+        build_res = subprocess.run(
+            [
+                "docker", "build", "--platform", "linux/amd64",
+                "-f", str(dockerfile), "-t", image, str(verification_dir),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if build_res.returncode != 0:
+            return {"docker": f"docker build failed: {(build_res.stderr or build_res.stdout)[-240:]}"}
+
+    run_res = subprocess.run(
+        [
+            "docker", "run", "--rm", "--platform", "linux/amd64",
+            "-v", f"{ws_root}:/workspace:ro",
+            "-v", f"{scip_out_dir}:/out",
+            image,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    generated = sorted(p.name for p in scip_out_dir.glob("*.scip"))
+    if run_res.returncode != 0 and not generated:
+        return {"docker": f"docker run failed: {(run_res.stderr or run_res.stdout)[-240:]}"}
+    return {"docker": f"OK (generated: {', '.join(generated) or 'none'})"}
