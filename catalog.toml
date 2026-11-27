@@ -1,0 +1,807 @@
+# Impulse Graph Engine — Canonical Verification & Test Catalog
+# Single source of truth for all test suites, fuzzers, sanitizers, coverage gates,
+# soak harnesses, benchmarks, and post-release checks across the ecosystem.
+
+[meta]
+schema_version = 1
+default_gamut = "standard"
+default_seed = 20261122
+
+[repos]
+spec = "impulse-graph-spec"
+core = "impulse-graph-core"
+java = "impulse-graph-java"
+ocaml = "impulse-ocaml"
+verification = "impulse-verification"
+benchmarks = "impulse-benchmarks"
+website = "impulse-website"
+
+# ---------------------------------------------------------------------------
+# Orthogonal Guarantee Pillars
+# ---------------------------------------------------------------------------
+[pillars.lint]
+description = "Static architectural invariants, ISA freeze/codegen drift, formatting, and SIMD codegen audits"
+
+[pillars.unit]
+description = "Per-repository unit, component, CLI, and language FFI binding test suites"
+
+[pillars.parity]
+description = "4-way polyglot spec compliance, cross-compiler parity, SIMD equivalence, and snapshot round-trip"
+
+[pillars.contracts]
+description = "Zero-allocation determinism, heap ceiling, topology fail-fast, and malicious input hardening"
+
+[pillars.metamorphic]
+description = "Algebraic, graph-semiring law, and metamorphic 4-way property verification"
+
+[pillars.fuzz]
+description = "Differential, contract-guided, corpus-mutation, OOM, 3VL, morsel, and PowerGrid fuzzers"
+
+[pillars.sanitize]
+description = "ASan/UBSan, TSan, LLVM MC/DC branch coverage, JaCoCo, and Pitest mutation analysis"
+
+[pillars.stress]
+description = "High-volume morsel/shader stress and sustained memory/RSS leak soak harnesses"
+
+[pillars.perf]
+description = "Micro/macro performance benchmarks and Java <= 2x C++ parity regression gates"
+
+[pillars.release-e2e]
+description = "CMake SDK install surface, live registry checks, and website/doc snippet verification"
+
+# ---------------------------------------------------------------------------
+# Named Gamuts (Ordered Assurance Ladder)
+# ---------------------------------------------------------------------------
+[gamuts.veryquick]
+description = "Fast deterministic edit-loop sanity (~30s, zero fuzzing)"
+target_time_sec = 30
+intensity = "quick"
+suites = [
+  "lint.engine_invariants",
+  "lint.spec_isa_m0",
+  "unit.verification.framework",
+  "unit.ocaml.dune",
+  "unit.cpp.ctest",
+  "parity.four_way_spec",
+]
+
+[gamuts.standard]
+description = "Canonical 'run all the tests' (~3-5m): all deterministic unit/parity/contract suites + bounded-seed metamorphic & differential fuzzing"
+target_time_sec = 300
+intensity = "standard"
+extends = ["veryquick"]
+suites = [
+  "lint.simd_codegen",
+  "unit.rust.engine",
+  "unit.rust.cli",
+  "unit.java.all",
+  "parity.cross_compiler",
+  "parity.simd_equivalence",
+  "parity.storage_coverage",
+  "parity.seeded_roundtrip_50",
+  "contracts.topology_failfast",
+  "contracts.zero_alloc_determinism",
+  "contracts.memory_ceiling",
+  "metamorphic.vm_laws",
+  "metamorphic.graph_algebra",
+  "fuzz.vm_contracts",
+  "fuzz.multihop_morsels",
+  "fuzz.mitra_multilane",
+  "fuzz.ieee754_3vl",
+  "fuzz.memory_planner_oom",
+  "fuzz.snapshot_morsels",
+]
+
+[gamuts.hardened]
+description = "Pre-merge safety sign-off (~10-20m): standard + FFI bindings + C++ ASan/UBSan + TSan + LLVM MC/DC + corpus mutation"
+target_time_sec = 1200
+intensity = "standard"
+extends = ["standard"]
+suites = [
+  "unit.ffi.python",
+  "unit.ffi.go",
+  "unit.ffi.node",
+  "unit.ffi.dotnet",
+  "sanitize.cpp.asan_ubsan",
+  "sanitize.cpp.tsan",
+  "sanitize.cpp.mcdc",
+  "sanitize.java.jacoco",
+  "fuzz.corpus_mutator",
+  "fuzz.powergrid_queries",
+  "stress.morsel_shaders",
+]
+
+[gamuts.full-gamut]
+description = "Pre-release sign-off (docs/RELEASE_CHECKLIST.md): hardened at deep 20k+ fuzz budgets + SDK install + perf regression gate"
+target_time_sec = 3600
+intensity = "deep"
+extends = ["hardened"]
+suites = [
+  "release.cmake_sdk_install",
+  "perf.benchmarks_quick",
+]
+
+[gamuts.soak]
+description = "Overnight / endurance verification: high-iteration fuzzing, corpus mutation, morsel stress, and Pitest mutation testing"
+target_time_sec = 14400
+intensity = "soak"
+suites = [
+  "fuzz.vm_contracts",
+  "fuzz.corpus_mutator",
+  "fuzz.multihop_morsels",
+  "fuzz.mitra_multilane",
+  "fuzz.ieee754_3vl",
+  "fuzz.memory_planner_oom",
+  "fuzz.snapshot_morsels",
+  "stress.morsel_shaders",
+  "sanitize.java.pitest",
+]
+
+[gamuts.bench]
+description = "Dedicated performance benchmark suite (impulse-benchmarks); excluded from default correctness runs"
+target_time_sec = 600
+intensity = "standard"
+suites = [
+  "perf.benchmarks_quick",
+  "perf.benchmarks_medium",
+  "perf.qlever",
+  "perf.financial_ledger",
+]
+
+[gamuts.post-release]
+description = "Post-publish verification: website strict MkDocs build and live registry checks"
+target_time_sec = 300
+intensity = "standard"
+suites = [
+  "release.website_mkdocs_strict",
+]
+
+# ---------------------------------------------------------------------------
+# Declarative Prerequisites
+# ---------------------------------------------------------------------------
+[prereqs.build_on]
+kind = "library"
+description = "C++ core library (optimizations ON)"
+hint = "cmake --build impulse-graph-core/impulse-cpp/build_on --target impulse_graph -j"
+
+[prereqs.build_off]
+kind = "library"
+description = "C++ core library (optimizations OFF)"
+hint = "cmake --build impulse-graph-core/impulse-cpp/build_off --target impulse_graph -j"
+
+[prereqs.java25]
+kind = "command"
+command = "mvn"
+description = "Maven + JDK 21/25 toolchain"
+hint = "Install Maven and JDK 25 (JAVA_HOME)"
+
+[prereqs.ocaml]
+kind = "command"
+command = "dune"
+description = "OCaml Dune toolchain"
+hint = "opam exec -- dune build (in impulse-ocaml)"
+
+[prereqs.cargo]
+kind = "command"
+command = "cargo"
+description = "Rust Cargo toolchain"
+hint = "Install Rust via rustup"
+
+[prereqs.cmake]
+kind = "command"
+command = "cmake"
+description = "CMake build system"
+hint = "brew install cmake"
+
+[prereqs.go]
+kind = "command"
+command = "go"
+description = "Go toolchain for impulse-go"
+hint = "brew install go"
+
+[prereqs.node]
+kind = "command"
+command = "npm"
+description = "Node.js / npm for impulse-node"
+hint = "brew install node"
+
+[prereqs.dotnet]
+kind = "command"
+command = "dotnet"
+description = ".NET SDK for impulse-dotnet"
+hint = "brew install --cask dotnet-sdk"
+
+[prereqs.pytest]
+kind = "python_module"
+module = "pytest"
+description = "pytest for impulse-python"
+hint = "python3 -m pip install pytest"
+
+[prereqs.docker]
+kind = "command"
+command = "docker"
+description = "Docker CLI for MkDocs / doc snippet verification"
+hint = "Install Docker Desktop or OrbStack"
+
+[prereqs.impulse_cli]
+kind = "binary"
+description = "impulse-graph CLI binary (for .imps builds & validation)"
+hint = "cargo build --release --manifest-path impulse-graph-core/impulse-cli/Cargo.toml"
+
+[prereqs.impulse_python]
+kind = "python_binding"
+description = "impulse_graph native Python binding (for .imps queries)"
+hint = "cd impulse-graph-core/impulse-python && python3 setup.py build_ext --inplace"
+
+[prereqs.powergrid_fixture]
+kind = "path"
+path = "{verification}/datasets/powergrid_fixture/case1354pegase"
+description = "Generated PowerGrid verification fixture"
+hint = "python3 impulse-verification/tools/build_powergrid_fixture.py --case case1354pegase"
+
+[prereqs.scip_clang]
+kind = "optional_command"
+command = "scip-clang"
+description = "Sourcegraph C/C++ SCIP indexer (optional; enhances Phase 3 call graph)"
+hint = "Download scip-clang release from github.com/sourcegraph/scip-clang/releases"
+
+[prereqs.scip_java]
+kind = "optional_command"
+command = "scip-java"
+description = "Sourcegraph Java/Kotlin/Scala SCIP indexer (optional; enhances Phase 3 call graph)"
+hint = "cs install scip-java (or brew install coursier/formulas/coursier && cs install scip-java)"
+
+[prereqs.rust_analyzer]
+kind = "optional_command"
+command = "rust-analyzer"
+description = "rust-analyzer with native 'rust-analyzer scip' (optional; enhances Phase 3 call graph)"
+hint = "rustup component add rust-analyzer"
+
+[prereqs.scip_python]
+kind = "optional_command"
+command = "scip-python"
+description = "Sourcegraph Python SCIP indexer (optional; enhances Phase 3 call graph)"
+hint = "npm install -g @sourcegraph/scip-python"
+
+# ---------------------------------------------------------------------------
+# Cataloged Suites — Static / Lint / Spec
+# ---------------------------------------------------------------------------
+[suites."lint.engine_invariants"]
+title = "Core Engine Architectural Invariant Linter (Zero-Synthesis / Zero-Heap-Alloc)"
+pillar = "lint"
+repo = "verification"
+determinism = "deterministic"
+cost = "fast"
+requires = []
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/check_engine_invariants.py", "--java-root", "{java}", "--cpp-root", "{core}/impulse-cpp"]
+
+[suites."lint.spec_isa_m0"]
+title = "ImpulseVM v0.11.0 ISA Freeze, Codegen Drift & M0 Spec Suite"
+pillar = "lint"
+repo = "spec"
+determinism = "deterministic"
+cost = "fast"
+requires = []
+cwd = "{spec}"
+cmd = ["{python}", "-u", "tools/test_isa_m0.py"]
+
+[suites."lint.simd_codegen"]
+title = "Cross-Compiler & Cross-Arch SIMD Codegen Audit Gate"
+pillar = "lint"
+repo = "verification"
+determinism = "deterministic"
+cost = "fast"
+requires = ["build_on"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/check_simd_codegen.py"]
+
+# ---------------------------------------------------------------------------
+# Cataloged Suites — Unit & FFI Bindings
+# ---------------------------------------------------------------------------
+[suites."unit.verification.framework"]
+title = "Verification Catalog, Runner, SCIP & .imps Graph Self-Tests"
+pillar = "unit"
+repo = "verification"
+determinism = "deterministic"
+cost = "fast"
+requires = []
+cwd = "{verification}"
+cmd = ["{python}", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"]
+
+[suites."unit.ocaml.dune"]
+title = "OCaml Reference Engine Unit Tests (dune runtest)"
+pillar = "unit"
+repo = "ocaml"
+determinism = "deterministic"
+cost = "fast"
+requires = ["ocaml"]
+cwd = "{ocaml}"
+cmd = ["dune", "runtest"]
+
+[suites."unit.cpp.ctest"]
+title = "C++20 Core Engine Unit & Integration Tests (ctest build_on)"
+pillar = "unit"
+repo = "core"
+determinism = "deterministic"
+cost = "fast"
+requires = ["build_on"]
+cwd = "{core}/impulse-cpp/build_on"
+cmd = ["ctest", "--output-on-failure"]
+
+[suites."unit.rust.engine"]
+title = "Rust Core Engine Crate Tests (impulse-rust)"
+pillar = "unit"
+repo = "core"
+determinism = "deterministic"
+cost = "fast"
+requires = ["cargo"]
+cwd = "{core}/impulse-rust"
+cmd = ["cargo", "test", "--lib"]
+
+[suites."unit.rust.cli"]
+title = "Impulse CLI Tooling Integration Tests (impulse-cli)"
+pillar = "unit"
+repo = "core"
+determinism = "deterministic"
+cost = "medium"
+requires = ["cargo"]
+cwd = "{core}/impulse-cli"
+cmd = ["cargo", "test"]
+
+[suites."unit.java.all"]
+title = "Java 25 11-Module Build, Spotless & JUnit5/jqwik Suite"
+pillar = "unit"
+repo = "java"
+determinism = "deterministic"
+cost = "medium"
+requires = ["java25"]
+cwd = "{java}"
+cmd = ["mvn", "-q", "test", "-DfailIfNoTests=false"]
+
+[suites."unit.ffi.python"]
+title = "Python FFI Binding Test Suite (pytest)"
+pillar = "unit"
+repo = "core"
+determinism = "deterministic"
+cost = "fast"
+requires = ["pytest", "impulse_python"]
+cwd = "{core}/impulse-python"
+cmd = ["{python}", "-m", "pytest", "tests/", "-v"]
+
+[suites."unit.ffi.go"]
+title = "Go FFI Binding Test Suite (go test -race)"
+pillar = "unit"
+repo = "core"
+determinism = "deterministic"
+cost = "fast"
+requires = ["go"]
+cwd = "{core}/impulse-go"
+cmd = ["go", "test", "-race", "./..."]
+
+[suites."unit.ffi.node"]
+title = "Node.js N-API Binding Test Suite (npm test)"
+pillar = "unit"
+repo = "core"
+determinism = "deterministic"
+cost = "fast"
+requires = ["node"]
+cwd = "{core}/impulse-node"
+cmd = ["npm", "test"]
+
+[suites."unit.ffi.dotnet"]
+title = ".NET Binding Test Suite (dotnet test)"
+pillar = "unit"
+repo = "core"
+determinism = "deterministic"
+cost = "fast"
+requires = ["dotnet"]
+cwd = "{core}/impulse-dotnet"
+cmd = ["dotnet", "test"]
+
+# ---------------------------------------------------------------------------
+# Cataloged Suites — 4-Way Polyglot Parity & Storage Round-Trip
+# ---------------------------------------------------------------------------
+[suites."parity.four_way_spec"]
+title = "4-Way Polyglot Spec Compliance & 100% Opcode Coverage (C++ ON/OFF, Java, OCaml)"
+pillar = "parity"
+repo = "spec"
+determinism = "deterministic"
+cost = "fast"
+requires = ["build_on", "build_off", "java25", "ocaml"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "{spec}/tools/run_vm_asm_suite.py", "--check-coverage"]
+coverage_parser = "opcode_suite"
+
+[suites."parity.cross_compiler"]
+title = "Cross-Compiler & Optimizer Parity (C++ vs Java CEL & v0.11 ImpScheme)"
+pillar = "parity"
+repo = "verification"
+determinism = "deterministic"
+cost = "medium"
+requires = ["build_on", "java25"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/cross_compiler_parity.py", "--v11-impscm"]
+
+[suites."parity.simd_equivalence"]
+title = "Suite #12: Differential SIMD / Architecture Equivalence"
+pillar = "parity"
+repo = "verification"
+determinism = "seeded"
+cost = "medium"
+requires = ["build_on", "build_off", "java25"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/test_simd_equivalence.py", "--spec-dir", "{spec}"]
+
+[suites."parity.simd_equivalence".profiles]
+quick    = ["--iterations", "50",  "--seed", "{seed}"]
+standard = ["--iterations", "200", "--seed", "{seed}"]
+deep     = ["--iterations", "1000","--seed", "{seed}"]
+soak     = ["--iterations", "5000","--seed", "{seed}"]
+
+[suites."parity.storage_coverage"]
+title = "Self-Describing Metamorphic Storage Coverage Correctness & Perf Gate"
+pillar = "parity"
+repo = "verification"
+determinism = "deterministic"
+cost = "medium"
+requires = ["build_on", "java25", "impulse_cli"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/test_storage_coverage.py"]
+
+[suites."parity.seeded_roundtrip_50"]
+title = "50 Seeded .imps Snapshots Round-Trip Idempotency (Seeds 1001..1050)"
+pillar = "parity"
+repo = "verification"
+determinism = "deterministic"
+cost = "medium"
+requires = ["impulse_cli"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/test_seeded_roundtrip_50.py", "--strict-alignment", "--deep-audit"]
+
+# ---------------------------------------------------------------------------
+# Cataloged Suites — Contracts & Resource Gates
+# ---------------------------------------------------------------------------
+[suites."contracts.topology_failfast"]
+title = "Negative Topology Fail-Fast Contract Gate"
+pillar = "contracts"
+repo = "verification"
+determinism = "deterministic"
+cost = "fast"
+requires = ["build_on"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/test_topology_contracts.py", "--spec-dir", "{spec}"]
+
+[suites."contracts.zero_alloc_determinism"]
+title = "Suite #11: Zero-Allocation & Workspace-Reuse Determinism Gate"
+pillar = "contracts"
+repo = "verification"
+determinism = "seeded"
+cost = "fast"
+requires = ["build_on", "build_off"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/test_zero_alloc_determinism.py", "--spec-dir", "{spec}"]
+
+[suites."contracts.zero_alloc_determinism".profiles]
+quick    = ["--iterations", "50",  "--seed", "{seed}"]
+standard = ["--iterations", "200", "--seed", "{seed}"]
+deep     = ["--iterations", "1000","--seed", "{seed}"]
+soak     = ["--iterations", "5000","--seed", "{seed}"]
+
+[suites."contracts.memory_ceiling"]
+title = "Sub-File-Size Heap Ceiling Gate (-Xmx32m)"
+pillar = "contracts"
+repo = "verification"
+determinism = "deterministic"
+cost = "fast"
+requires = ["build_on", "java25"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/test_memory_ceiling.py", "--spec-dir", "{spec}"]
+
+# ---------------------------------------------------------------------------
+# Cataloged Suites — Metamorphic & Algebraic Laws
+# ---------------------------------------------------------------------------
+[suites."metamorphic.vm_laws"]
+title = "Metamorphic Property Gate (25 Algebraic/Graph Laws x 4 Engines)"
+pillar = "metamorphic"
+repo = "verification"
+determinism = "seeded"
+cost = "medium"
+requires = ["build_on", "build_off", "java25", "ocaml"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/metamorphic_vm_test.py", "--spec-dir", "{spec}"]
+
+[suites."metamorphic.vm_laws".profiles]
+quick    = ["--iterations", "200",  "--seed", "{seed}"]
+standard = ["--iterations", "2000", "--seed", "{seed}"]
+deep     = ["--iterations", "10000","--seed", "{seed}"]
+soak     = ["--iterations", "50000","--seed", "{seed}"]
+
+[suites."metamorphic.graph_algebra"]
+title = "Suite #4: Graph-Algebraic & Semiring Law Property Tester"
+pillar = "metamorphic"
+repo = "verification"
+determinism = "seeded"
+cost = "medium"
+requires = ["build_on", "build_off", "java25"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/test_graph_algebra_laws.py", "--spec-dir", "{spec}"]
+
+[suites."metamorphic.graph_algebra".profiles]
+quick    = ["--trials", "50",  "--seed", "{seed}"]
+standard = ["--trials", "250", "--seed", "{seed}"]
+deep     = ["--trials", "1000","--seed", "{seed}"]
+soak     = ["--trials", "5000","--seed", "{seed}"]
+
+# ---------------------------------------------------------------------------
+# Cataloged Suites — Differential & Fault-Injection Fuzzers
+# ---------------------------------------------------------------------------
+[suites."fuzz.vm_contracts"]
+title = "Multi-Profile Contract-Guided Differential VM Fuzzer (10 Profiles x 4 Engines)"
+pillar = "fuzz"
+repo = "verification"
+determinism = "seeded"
+cost = "medium"
+requires = ["build_on", "build_off", "java25", "ocaml"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/fuzz_vm_contracts.py", "--profile", "all", "--workers", "{workers}", "--shrink", "--coverage-report", "--spec-dir", "{spec}"]
+coverage_parser = "opcode_fuzz"
+
+[suites."fuzz.vm_contracts".profiles]
+quick    = ["--iterations", "500",   "--seed", "{seed}"]
+standard = ["--iterations", "2000",  "--seed", "{seed}"]
+deep     = ["--iterations", "20000", "--seed", "{seed}"]
+soak     = ["--iterations", "200000","--seed", "{seed}"]
+
+[suites."fuzz.corpus_mutator"]
+title = "Structure-Aware Corpus Mutation Differential Fuzzer"
+pillar = "fuzz"
+repo = "verification"
+determinism = "seeded"
+cost = "medium"
+requires = ["build_on", "build_off", "java25", "ocaml"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/mutate_corpus_fuzzer.py", "--workers", "{workers}", "--shrink", "--spec-dir", "{spec}"]
+
+[suites."fuzz.corpus_mutator".profiles]
+quick    = ["--iterations", "250",   "--seed", "{seed}"]
+standard = ["--iterations", "2000",  "--seed", "{seed}"]
+deep     = ["--iterations", "10000", "--seed", "{seed}"]
+soak     = ["--iterations", "100000","--seed", "{seed}"]
+
+[suites."fuzz.multihop_morsels"]
+title = "Suite #1: Multi-Hop Chained Morsel & Pipelined DAG Differential Fuzzer"
+pillar = "fuzz"
+repo = "verification"
+determinism = "seeded"
+cost = "medium"
+requires = ["build_on", "build_off", "java25"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/fuzz_multihop_morsels.py", "--spec-dir", "{spec}"]
+
+[suites."fuzz.multihop_morsels".profiles]
+quick    = ["--iterations", "50",   "--seed", "{seed}"]
+standard = ["--iterations", "250",  "--seed", "{seed}"]
+deep     = ["--iterations", "2000", "--seed", "{seed}"]
+soak     = ["--iterations", "20000","--seed", "{seed}"]
+
+[suites."fuzz.mitra_multilane"]
+title = "Suite #2: Multi-Lane Semiring & Witness (MITra) Differential Fuzzer"
+pillar = "fuzz"
+repo = "verification"
+determinism = "seeded"
+cost = "medium"
+requires = ["build_on", "build_off", "java25"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/fuzz_mitra_multilane.py", "--spec-dir", "{spec}"]
+
+[suites."fuzz.mitra_multilane".profiles]
+quick    = ["--iterations", "50",   "--seed", "{seed}"]
+standard = ["--iterations", "250",  "--seed", "{seed}"]
+deep     = ["--iterations", "2000", "--seed", "{seed}"]
+soak     = ["--iterations", "20000","--seed", "{seed}"]
+
+[suites."fuzz.ieee754_3vl"]
+title = "Suite #5: Adversarial IEEE-754 & SQL 3-Valued Logic Differential Fuzzer"
+pillar = "fuzz"
+repo = "verification"
+determinism = "seeded"
+cost = "medium"
+requires = ["build_on", "build_off", "java25"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/fuzz_ieee754_3vl.py", "--spec-dir", "{spec}"]
+
+[suites."fuzz.ieee754_3vl".profiles]
+quick    = ["--iterations", "50",   "--seed", "{seed}"]
+standard = ["--iterations", "250",  "--seed", "{seed}"]
+deep     = ["--iterations", "2000", "--seed", "{seed}"]
+soak     = ["--iterations", "20000","--seed", "{seed}"]
+
+[suites."fuzz.memory_planner_oom"]
+title = "Suite #6: Workspace Memory-Planner Tight-Bound & OOM Fault-Injection Fuzzer"
+pillar = "fuzz"
+repo = "verification"
+determinism = "seeded"
+cost = "fast"
+requires = ["build_on"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/fuzz_memory_planner_oom.py", "--spec-dir", "{spec}"]
+
+[suites."fuzz.memory_planner_oom".profiles]
+quick    = ["--iterations", "50",   "--seed", "{seed}"]
+standard = ["--iterations", "250",  "--seed", "{seed}"]
+deep     = ["--iterations", "2000", "--seed", "{seed}"]
+soak     = ["--iterations", "20000","--seed", "{seed}"]
+
+[suites."fuzz.snapshot_morsels"]
+title = "Snapshot-Backed Morsel & Multi-Lane Corpus + Metamorphic Fuzzer"
+pillar = "fuzz"
+repo = "verification"
+determinism = "seeded"
+cost = "medium"
+requires = ["build_on", "build_off", "java25"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/fuzz_snapshot_morsels.py", "--spec-dir", "{spec}"]
+
+[suites."fuzz.snapshot_morsels".profiles]
+quick    = ["--iterations", "50",   "--seed", "{seed}"]
+standard = ["--iterations", "250",  "--seed", "{seed}"]
+deep     = ["--iterations", "2000", "--seed", "{seed}"]
+soak     = ["--iterations", "20000","--seed", "{seed}"]
+
+[suites."fuzz.powergrid_queries"]
+title = "5-Way PowerGrid Differential Query Fuzzer vs SQLite Oracle"
+pillar = "fuzz"
+repo = "verification"
+determinism = "seeded"
+cost = "medium"
+requires = ["build_on", "java25", "powergrid_fixture"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/fuzz_powergrid_queries.py", "--case", "case1354pegase"]
+
+[suites."fuzz.powergrid_queries".profiles]
+quick    = ["--count", "25",  "--seed", "{seed}"]
+standard = ["--count", "100", "--seed", "{seed}"]
+deep     = ["--count", "500", "--seed", "{seed}"]
+soak     = ["--count", "2500","--seed", "{seed}"]
+
+# ---------------------------------------------------------------------------
+# Cataloged Suites — Sanitizers, Coverage & Mutation Analysis
+# ---------------------------------------------------------------------------
+[suites."sanitize.cpp.asan_ubsan"]
+title = "C++20 ASan + Fatal UBSan Build & Test Gate"
+pillar = "sanitize"
+repo = "core"
+determinism = "deterministic"
+cost = "slow"
+requires = ["cmake"]
+cwd = "{core}"
+cmd = ["sh", "-c", "cmake -S impulse-cpp -B impulse-cpp/build-san -DCMAKE_BUILD_TYPE=Debug -DIMPULSE_SANITIZE=ON -DIMPULSE_ENABLE_ASSERTIONS=ON && cmake --build impulse-cpp/build-san -j && ctest --test-dir impulse-cpp/build-san --output-on-failure"]
+
+[suites."sanitize.cpp.tsan"]
+title = "C++20 ThreadSanitizer (TSan) Build & Test Gate"
+pillar = "sanitize"
+repo = "core"
+determinism = "deterministic"
+cost = "slow"
+requires = ["cmake"]
+cwd = "{core}"
+cmd = ["sh", "-c", "cmake -S impulse-cpp -B impulse-cpp/build-tsan -DCMAKE_BUILD_TYPE=Debug -DIMPULSE_SANITIZE_THREAD=ON -DIMPULSE_ENABLE_ASSERTIONS=ON && cmake --build impulse-cpp/build-tsan -j && ctest --test-dir impulse-cpp/build-tsan --output-on-failure"]
+
+[suites."sanitize.cpp.mcdc"]
+title = "C++20 LLVM MC/DC Branch Coverage Build & Test"
+pillar = "sanitize"
+repo = "core"
+determinism = "deterministic"
+cost = "slow"
+requires = ["cmake"]
+cwd = "{core}"
+cmd = ["sh", "-c", "cmake -S impulse-cpp -B impulse-cpp/build-mcdc -DCMAKE_BUILD_TYPE=Debug -DIMPULSE_ENABLE_MCDC_COVERAGE=ON -DIMPULSE_COVERAGE_TEST=ON && cmake --build impulse-cpp/build-mcdc -j && ctest --test-dir impulse-cpp/build-mcdc --output-on-failure"]
+coverage_parser = "llvm_cov"
+
+[suites."sanitize.java.jacoco"]
+title = "Java 25 JaCoCo Line & Branch Coverage Report"
+pillar = "sanitize"
+repo = "java"
+determinism = "deterministic"
+cost = "slow"
+requires = ["java25"]
+cwd = "{java}"
+cmd = ["mvn", "-q", "test", "jacoco:report", "-DfailIfNoTests=false"]
+coverage_parser = "jacoco"
+
+[suites."sanitize.java.pitest"]
+title = "Java 25 Pitest Mutation Testing"
+pillar = "sanitize"
+repo = "java"
+determinism = "stochastic"
+cost = "soak"
+requires = ["java25"]
+cwd = "{java}"
+cmd = ["mvn", "-q", "test-compile", "org.pitest:pitest-maven:mutationCoverage"]
+coverage_parser = "pitest"
+
+# ---------------------------------------------------------------------------
+# Cataloged Suites — Stress & Soak
+# ---------------------------------------------------------------------------
+[suites."stress.morsel_shaders"]
+title = "Dedicated Morsel & Shader High-Volume Stress Suite"
+pillar = "stress"
+repo = "verification"
+determinism = "seeded"
+cost = "slow"
+requires = ["build_on", "build_off", "java25"]
+cwd = "{verification}"
+cmd = ["{python}", "-u", "tools/test_morsel_stress.py", "--spec-dir", "{spec}"]
+
+[suites."stress.morsel_shaders".profiles]
+quick    = ["--seed", "{seed}"]
+standard = ["--seed", "{seed}"]
+deep     = ["--seed", "{seed}"]
+soak     = ["--seed", "{seed}"]
+
+# ---------------------------------------------------------------------------
+# Cataloged Suites — Performance Benchmarks
+# ---------------------------------------------------------------------------
+[suites."perf.benchmarks_quick"]
+title = "Impulse Core Benchmarks (Small Scale, Java <= 2x C++ Gate)"
+pillar = "perf"
+repo = "benchmarks"
+determinism = "benchmark"
+cost = "medium"
+requires = ["java25", "cmake"]
+cwd = "{benchmarks}"
+cmd = ["{python}", "-u", "run_benchmarks.py", "--scale", "small", "--warmup", "3", "--iters", "10"]
+
+[suites."perf.benchmarks_medium"]
+title = "Impulse Core Benchmarks (Medium Scale)"
+pillar = "perf"
+repo = "benchmarks"
+determinism = "benchmark"
+cost = "slow"
+requires = ["java25", "cmake"]
+cwd = "{benchmarks}"
+cmd = ["{python}", "-u", "run_benchmarks.py", "--scale", "medium", "--warmup", "3", "--iters", "10"]
+
+[suites."perf.qlever"]
+title = "QLever Comparison Benchmark"
+pillar = "perf"
+repo = "benchmarks"
+determinism = "benchmark"
+cost = "slow"
+requires = ["cmake"]
+cwd = "{benchmarks}"
+cmd = ["{python}", "-u", "qlever_bench.py", "--warmup", "3", "--iters", "10", "--threads", "1"]
+
+[suites."perf.financial_ledger"]
+title = "Financial Ledger DECIMAL64 Benchmark"
+pillar = "perf"
+repo = "benchmarks"
+determinism = "benchmark"
+cost = "medium"
+requires = ["impulse_python"]
+cwd = "{benchmarks}"
+cmd = ["{python}", "-u", "financial_ledger_bench.py"]
+
+# ---------------------------------------------------------------------------
+# Cataloged Suites — Release & Post-Publish E2E
+# ---------------------------------------------------------------------------
+[suites."release.cmake_sdk_install"]
+title = "CMake SDK Public Header & Config Install Surface Check"
+pillar = "release-e2e"
+repo = "core"
+determinism = "deterministic"
+cost = "fast"
+requires = ["cmake", "build_on"]
+cwd = "{core}"
+cmd = ["cmake", "--install", "impulse-cpp/build_on", "--prefix", "/tmp/impulse-sdk-check"]
+
+[suites."release.website_mkdocs_strict"]
+title = "Documentation Portal Strict MkDocs Build"
+pillar = "release-e2e"
+repo = "website"
+determinism = "deterministic"
+cost = "fast"
+requires = ["docker"]
+cwd = "{website}"
+cmd = ["docker", "run", "--rm", "-v", "{website}:/docs", "squidfunk/mkdocs-material", "build", "--strict"]

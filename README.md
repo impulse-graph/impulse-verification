@@ -14,16 +14,61 @@ impulse-graph-spec (pinned at spec/)
         └── impulse-verification (Four-Way Polyglot Validation & Differential Fuzzing)
 ```
 
+## Unified Verification Runner & `.imps` Knowledge Graph (`verify.py`)
+
+All test suites, fuzzers, sanitizers, coverage gates, benchmarks, and post-release checks across the ecosystem are formally cataloged in [`catalog.toml`](catalog.toml) and invoked through [`verify.py`](verify.py).
+
+### Named Gamuts
+
+| Gamut | Meaning | Typical Time |
+| :--- | :--- | :--- |
+| **`veryquick`** | Fast deterministic edit-loop sanity (zero fuzzing) | ~30s |
+| **`standard`** | **Default *"run all tests"***: deterministic unit/parity/contracts + bounded-seed metamorphic & differential fuzzing | ~3–5m |
+| **`hardened`** | Pre-merge safety sign-off: `standard` + FFI bindings + ASan/UBSan/TSan + LLVM MC/DC + JaCoCo + corpus mutation | ~10–20m |
+| **`full-gamut`** | **Pre-release sign-off** (`docs/RELEASE_CHECKLIST.md`): `hardened` at 20k+ fuzz budgets + SDK install + perf regression gate | ~30–90m |
+| **`soak`** | Overnight endurance: high-iteration fuzzing, morsel stress, Pitest mutation testing | Hours |
+| **`bench`** | Dedicated performance benchmarks (`impulse-benchmarks`), excluded from default correctness runs | Varies |
+| **`post-release`** | Post-publish website strict MkDocs build & registry checks | ~5m |
+
+### Common Commands
+
+```bash
+# Check sibling repo HEADs, build artifacts, and optional SCIP indexers
+python3 verify.py doctor
+
+# Canonical "run all the tests" (writes run ledger + syncs datasets/verification.imps)
+python3 verify.py run --gamut standard
+
+# Pre-release sign-off
+python3 verify.py run --gamut full-gamut
+
+# Answer "are all tests passing?" with exact PASS/FAIL/SKIP + cross-repo commit staleness
+python3 verify.py status
+
+# Slice by orthogonal pillar or repo, or override a sibling repo with an active worktree
+python3 verify.py run --pillar fuzz,metamorphic --intensity quick
+python3 verify.py run --gamut veryquick --override java=../.worktrees/my-fix/impulse-graph-java
+
+# Index static call chains (SCIP-first + fallback) & query datasets/verification.imps natively
+python3 verify.py index
+python3 verify.py opcode OP_INDEX_SCAN
+python3 verify.py callers execIndexScan --depth 3
+python3 verify.py where impulse_stmt_execute
+python3 verify.py impacted --diff
+python3 verify.py gaps
+python3 verify.py audit-invariants
+```
+
 ## Tools & Suites
 
 | Tool | Description |
 | :--- | :--- |
-| `tools/four_way_validation.py` | Primary four-way polyglot validation suite verifying 100% bitwise/state-identical outputs (`status`, `PC`, `ZF`/`ST` flags, `R0`..`R63`, and `ICTX` v1 context hash) across C++ (`ON`), C++ (`OFF`), Java 25, and OCaml across all `.impas` test vectors in `spec/test-vectors/vm-impas/`. |
+| `verify.py` + `catalog.toml` | Unified verification CLI, declarative suite catalog, `.imps` dogfooding sync (`datasets/verification.imps`), and SCIP-first static call-chain / opcode provenance queries. |
+| `tools/run_quality_suite.py` | Legacy 4-stage VM quality gate (superseded by `verify.py run --gamut standard`). |
 | `tools/fuzz_vm_contracts.py` | Contract-guided differential VM bytecode fuzzer generating type-valid `impOps` instruction streams and asserting 4-way consensus. |
-| `tools/generate_random_imps.py` | Deterministic, seeded, versioned (`.imps`) schema and dataset generator synthesizing random domains (`D1`..`Dk`), relations (`R_D1_D2_1`..), and typed/nullable attributes (`D1_A1_INT`, `D1_A2_NULL_INT`, `R_D1_D2_1_A1_VEC4_FLOAT`, etc.) into `manifest.json` + CSVs and compiling/validating `.imps` snapshots via `impulse-graph`. |
+| `tools/generate_random_imps.py` | Deterministic, seeded, versioned (`.imps`) schema and dataset generator synthesizing random domains, relations, and typed/nullable attributes into `manifest.json` + CSVs and compiling/validating `.imps` snapshots via `impulse-graph`. |
 | `tools/generate_fixtures.py` | Canonical topology snapshot fixture generator (`g0_empty.imps` .. `g7_bipartite_rebac.imps`). |
-| `tools/cross_compiler_parity.py` | Cross-compiler bytecode parity runner comparing C++ and Java CEL / traversal compilation outputs. |
-| `tools/three_way_validation.py` | Legacy three-way validation runner. |
+| `tools/cross_compiler_parity.py` | Cross-compiler bytecode parity runner comparing C++ and Java CEL / traversal / ImpScheme compilation outputs. |
 | `java-cross-engine/` | Relocated Java JNA/CLI cross-engine verification tests (`CrossEngineVerificationTest.java`, `SnapshotBuilderCliValidationTest.java`). |
 
 ## Generating Seeded Random `.imps` Schemas & Snapshots
