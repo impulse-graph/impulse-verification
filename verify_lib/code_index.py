@@ -58,7 +58,16 @@ JAVA_METHOD_RE = re.compile(
     r"^\s*(?:public|private|protected|static|final|synchronized|abstract|native|\s)+"
     r"(?:<[^>]+>\s+)?[\w<>\[\], ?]+\s+([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:throws\s+[\w.,\s]+)?\{"
 )
+KOTLIN_FN_RE = re.compile(r"^\s*(?:public|private|internal|protected|override|inline|suspend|\s)*fun\s+(?:<[^>]+>\s+)?(?:[\w.<>]+\.)?([A-Za-z_]\w*)\s*\(")
+SCALA_DEF_RE = re.compile(r"^\s*(?:override\s+|private\s+|protected\s+|final\s+)*def\s+([A-Za-z_]\w*)")
+CLOJURE_DEF_RE = re.compile(r"^\s*\(defn-?\s+([A-Za-z0-9_\-\?\!\*]+)")
 RUST_FN_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:extern\s+\"C\"\s+)?fn\s+([A-Za-z_]\w*)")
+GO_FUNC_RE = re.compile(r"^\s*func\s+(?:\([^)]+\)\s+)?([A-Za-z_]\w*)\s*\(")
+CSHARP_METHOD_RE = re.compile(
+    r"^\s*(?:public|private|protected|internal|static|extern|unsafe|virtual|override|async|\s)+"
+    r"[\w<>\[\], ?*]+\s+([A-Za-z_]\w*)\s*\([^;{}]*\)"
+)
+TS_FUNC_RE = re.compile(r"^\s*(?:export\s+)?(?:async\s+)?(?:function\s+([A-Za-z_]\w*)\s*\(|([A-Za-z_]\w*)\s*\([^)]*\)\s*(?::\s*[\w<>\[\]| ]+)?\s*\{)")
 OCAML_LET_RE = re.compile(r"^\s*(?:let(?:\s+rec)?|and)\s+([a-z_][a-zA-Z0-9_']*)\b")
 CALL_TOKEN_RE = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 KEYWORDS = frozenset({
@@ -144,27 +153,46 @@ def _extract_brace_file(
     lang: str,
     pattern: re.Pattern[str],
     text: str,
+    *,
+    multiline_sig: bool = False,
 ) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
     syms: list[dict[str, Any]] = []
     raw_calls: list[tuple[str, str]] = []
     lines = text.splitlines()
     fkey = f"{repo}/{rel}"
     is_test_file = "test" in rel.lower()
-    for i, line in enumerate(lines):
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         m = pattern.match(line)
+        sig_end = i
+        # Handle multi-line C++/C#/Java function signatures (up to 6 continuation lines)
+        if not m and multiline_sig and line.strip() and not line.lstrip().startswith(("//", "/*", "*", "#")):
+            stripped = line.strip()
+            if "(" in stripped and ";" not in stripped and "{" not in stripped:
+                joined = stripped
+                for j in range(i + 1, min(len(lines), i + 7)):
+                    joined += " " + lines[j].strip()
+                    sig_end = j
+                    if "{" in lines[j] or ";" in lines[j]:
+                        break
+                if "{" in joined and ";" not in joined.split("{", 1)[0]:
+                    m = pattern.match(joined)
         if not m:
+            i += 1
             continue
-        name = m.group(1)
-        if name in KEYWORDS or len(name) < 2:
+        name = next((g for g in m.groups() if g), "")
+        if not name or name in KEYWORDS or len(name) < 2:
+            i += 1
             continue
         line_start = i + 1
-        line_end = _find_brace_end(lines, i)
+        line_end = _find_brace_end(lines, sig_end) if "{" in "\n".join(lines[i : sig_end + 1]) else sig_end + 1
         body = "\n".join(lines[i:line_end])
         skey = f"{repo}:{lang}:{rel}:{name}"
         syms.append({
             "key": skey,
             "name": name,
-            "kind": "method" if lang == "java" else "function",
+            "kind": "method" if lang in ("java", "kotlin", "scala", "csharp") else "function",
             "file_path": fkey,
             "file_key": fkey,
             "line_start": line_start,
@@ -178,6 +206,7 @@ def _extract_brace_file(
             callee = cm.group(1)
             if callee != name and callee not in KEYWORDS:
                 raw_calls.append((skey, callee))
+        i = sig_end + 1
     return syms, raw_calls
 
 
@@ -305,7 +334,15 @@ def build_code_index(
         ("core", ws.repos["core"] / "impulse-rust", {".rs"}, "rust"),
         ("core", ws.repos["core"] / "impulse-cli", {".rs"}, "rust"),
         ("core", ws.repos["core"] / "impulse-python", {".py"}, "python"),
+        ("core", ws.repos["core"] / "impulse-python" / "src", {".cpp", ".cc", ".h", ".hpp"}, "cpp"),
+        ("core", ws.repos["core"] / "impulse-go", {".go"}, "go"),
+        ("core", ws.repos["core"] / "impulse-node", {".cpp", ".cc", ".h", ".hpp"}, "cpp"),
+        ("core", ws.repos["core"] / "impulse-node", {".ts", ".js"}, "ts"),
+        ("core", ws.repos["core"] / "impulse-dotnet", {".cs"}, "csharp"),
         ("java", ws.repos["java"], {".java"}, "java"),
+        ("java", ws.repos["java"], {".kt"}, "kotlin"),
+        ("java", ws.repos["java"], {".scala"}, "scala"),
+        ("java", ws.repos["java"], {".clj"}, "clojure"),
         ("ocaml", ws.repos["ocaml"], {".ml", ".mli"}, "ocaml"),
         ("verification", ws.repos["verification"] / "tools", {".py"}, "python"),
         ("spec", ws.repos["spec"] / "tools", {".py"}, "python"),
@@ -338,11 +375,23 @@ def build_code_index(
             if lang == "python":
                 fsyms, fcalls = _extract_python_file(p, rel, repo_k, text)
             elif lang == "cpp":
-                fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "cpp", CPP_FUNC_RE, text)
+                fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "cpp", CPP_FUNC_RE, text, multiline_sig=True)
             elif lang == "java":
-                fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "java", JAVA_METHOD_RE, text)
+                fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "java", JAVA_METHOD_RE, text, multiline_sig=True)
+            elif lang == "kotlin":
+                fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "kotlin", KOTLIN_FN_RE, text)
+            elif lang == "scala":
+                fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "scala", SCALA_DEF_RE, text)
+            elif lang == "clojure":
+                fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "clojure", CLOJURE_DEF_RE, text)
             elif lang == "rust":
                 fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "rust", RUST_FN_RE, text)
+            elif lang == "go":
+                fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "go", GO_FUNC_RE, text)
+            elif lang == "csharp":
+                fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "csharp", CSHARP_METHOD_RE, text, multiline_sig=True)
+            elif lang == "ts":
+                fsyms, fcalls = _extract_brace_file(p, rel, repo_k, "ts", TS_FUNC_RE, text)
             elif lang == "ocaml":
                 fsyms, fcalls = _extract_ocaml_file(rel, repo_k, text)
             else:
