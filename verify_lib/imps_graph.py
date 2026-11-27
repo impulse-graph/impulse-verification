@@ -932,9 +932,23 @@ class VerificationGraph:
             for suite_nid in self._neighbors_in("EXERCISES_OPCODE", oid):
                 impacted_suites.add(self._key("Suite", suite_nid))
 
+        # Include repo-targeted fast/unit/parity suites, respecting suite.paths scoping when set
+        matched_rel_by_repo: dict[str, list[str]] = {}
+        for fid in matched_fids:
+            fkey = self._key("SourceFile", fid)
+            if "/" in fkey:
+                rk, rel_p = fkey.split("/", 1)
+                matched_rel_by_repo.setdefault(rk, []).append(rel_p)
+
         for rname in matched_repos:
+            changed_rels = matched_rel_by_repo.get(rname, [])
             for s in cat.suites.values():
-                if s.repo == rname and s.pillar in ("lint", "unit", "parity"):
+                if s.repo != rname or s.pillar not in ("lint", "unit", "parity"):
+                    continue
+                if s.paths:
+                    if any(any(rp.startswith(pref) for pref in s.paths) for rp in changed_rels):
+                        impacted_suites.add(s.id)
+                else:
                     impacted_suites.add(s.id)
 
         cost_rank = {"fast": 0, "medium": 1, "slow": 2, "soak": 3}
@@ -1006,4 +1020,88 @@ class VerificationGraph:
             "transitive_alloc_violations": alloc_violations[:50],
             "asymmetric_opcode_count": len(asymmetric_opcodes),
             "asymmetric_opcodes_sample": asymmetric_opcodes[:30],
+        }
+
+    @staticmethod
+    def _binding_bucket(file_path: str, repo: str, lang: str) -> str:
+        fp = file_path.lower()
+        if "impulse-python/" in fp:
+            return "python"
+        if "impulse-go/" in fp:
+            return "go"
+        if "impulse-node/" in fp:
+            return "node"
+        if "impulse-dotnet/" in fp:
+            return "dotnet"
+        if "impulse-rust/" in fp or "impulse-cli/" in fp:
+            return "rust"
+        if "impulse-cpp/" in fp:
+            return "cpp"
+        if repo == "java":
+            if "impulse-kotlin/" in fp or lang == "kotlin":
+                return "kotlin"
+            if "impulse-scala/" in fp or lang == "scala":
+                return "scala"
+            if "impulse-clojure/" in fp or lang == "clojure":
+                return "clojure"
+            return "java"
+        if repo == "ocaml":
+            return "ocaml"
+        return repo
+
+    def query_binding_matrix(self, pattern: str) -> dict[str, Any]:
+        """Cross-language C-ABI & JVM DSL parity matrix for any capability/symbol substring."""
+        q_lo = pattern.strip().lower()
+        # Normalize token variants so 'get_domain_attribute' also matches camelCase 'DomainAttribute'
+        norm_q = q_lo.replace("_", "").replace("-", "")
+        all_langs = ["cpp", "rust", "python", "go", "node", "dotnet", "java", "kotlin", "scala", "clojure"]
+
+        cabi_rows: list[dict[str, Any]] = []
+        for cid in range(self._dom_count("CAbiSymbol")):
+            ckey = self._key("CAbiSymbol", cid)
+            cname = ckey.removeprefix("cabi:")
+            if q_lo not in cname.lower() and norm_q not in cname.lower().replace("_", ""):
+                continue
+            ca = self.attrs.get("CAbiSymbol", {}).get(ckey, {})
+            impls = [self._symbol_info(sid) for sid in self._neighbors_in("IMPLEMENTS_CABI", cid)]
+            callers = [self._symbol_info(sid) for sid in self._neighbors_in("CALLS_CABI", cid)]
+            by_lang: dict[str, list[str]] = {lang: [] for lang in all_langs}
+            for s in impls:
+                b = self._binding_bucket(s["file_path"], s["repo"], s["language"])
+                if b in by_lang:
+                    by_lang[b].append(f"impl:{s['file_path']}:{s['line_start']}")
+            for s in callers:
+                b = self._binding_bucket(s["file_path"], s["repo"], s["language"])
+                if b in by_lang:
+                    by_lang[b].append(f"{s['file_path']}:{s['line_start']}")
+            cabi_rows.append(
+                {
+                    "cabi": cname,
+                    "header": f"{ca.get('header_file', '')}:{ca.get('line_start', 0)}",
+                    "by_lang": {k: sorted(set(v)) for k, v in by_lang.items()},
+                }
+            )
+
+        # Also group matching non-test symbols across ALL languages (answers "do Java/Kotlin/Scala/Clojure have it?")
+        symbols_by_lang: dict[str, list[dict[str, Any]]] = {lang: [] for lang in all_langs}
+        for sid in range(self._dom_count("Symbol")):
+            info = self._symbol_info(sid)
+            if info["is_test"]:
+                continue
+            n_lo = info["name"].lower()
+            if q_lo in n_lo or (len(norm_q) >= 4 and norm_q in n_lo.replace("_", "").replace("-", "")):
+                b = self._binding_bucket(info["file_path"], info["repo"], info["language"])
+                if b in symbols_by_lang:
+                    symbols_by_lang[b].append(
+                        {
+                            "name": info["name"],
+                            "location": f"{info['file_path']}:{info['line_start']}-{info['line_end']}",
+                        }
+                    )
+
+        return {
+            "pattern": pattern,
+            "languages": all_langs,
+            "cabi_rows": cabi_rows,
+            "symbols_by_lang": {k: v[:15] for k, v in symbols_by_lang.items()},
         }

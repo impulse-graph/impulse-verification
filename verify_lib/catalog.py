@@ -53,6 +53,7 @@ class SuiteSpec:
     requires: tuple[str, ...]
     cwd: str
     cmd: tuple[str, ...]
+    paths: tuple[str, ...] = ()
     profiles: dict[str, tuple[str, ...]] = field(default_factory=dict)
     coverage_parser: str | None = None
 
@@ -262,6 +263,7 @@ def load_catalog(catalog_path: Path | None = None) -> Catalog:
             requires=reqs,
             cwd=str(cfg["cwd"]),
             cmd=tuple(str(x) for x in cfg["cmd"]),
+            paths=tuple(str(p) for p in cfg.get("paths", [])),
             profiles=profiles,
             coverage_parser=cfg.get("coverage_parser"),
         )

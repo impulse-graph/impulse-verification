@@ -437,6 +437,38 @@ def cmd_audit_invariants(args: argparse.Namespace, cat, ws) -> int:
     return 0 if not data["transitive_alloc_violations"] else 1
 
 
+def cmd_matrix(args: argparse.Namespace, cat, ws) -> int:
+    with _open_graph_checked(cat, ws, auto_refresh=args.auto_refresh, quiet=args.json) as vg:
+        data = vg.query_binding_matrix(args.pattern)
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+    langs = data["languages"]
+    print(f"{BOLD}Cross-Language Parity Matrix for '{args.pattern}'{RESET}")
+    if data["cabi_rows"]:
+        ffi_langs = ["cpp", "rust", "python", "go", "node", "dotnet"]
+        hdr = f"  {'C-ABI Symbol':<48s} " + " ".join(f"{l:<7s}" for l in ffi_langs)
+        print(hdr)
+        print("  " + "-" * (len(hdr) - 2))
+        for row in data["cabi_rows"]:
+            cells = []
+            for l in ffi_langs:
+                hits = row["by_lang"].get(l, [])
+                if hits:
+                    cells.append(f"{GREEN}{'YES':<7s}{RESET}")
+                else:
+                    cells.append(f"{RED}{'MISS':<7s}{RESET}")
+            print(f"  {row['cabi']:<48s} " + " ".join(cells))
+    print(f"\n{BOLD}Matching Symbols by Language / Binding (incl. JVM DSLs){RESET}")
+    for l in langs:
+        hits = data["symbols_by_lang"].get(l, [])
+        badge = f"{GREEN}{len(hits):2d} hit(s){RESET}" if hits else f"{YELLOW} 0 hits {RESET}"
+        print(f"  {l:<10s} [{badge}]")
+        for h in hits[:5]:
+            print(f"             - {h['name']}  {h['location']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="verify.py",
@@ -517,6 +549,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("audit-invariants", help="Run transitive call-graph invariant & 3-engine opcode symmetry audit")
     sp.add_argument("--json", action="store_true")
+
+    sp = sub.add_parser("matrix", help="Cross-language FFI & JVM DSL parity matrix for a capability/symbol pattern")
+    sp.add_argument("pattern", help="Substring/capability to check (e.g. get_domain_attribute, domain_attribute, decimal)")
+    sp.add_argument("--json", action="store_true")
     return p
 
 
@@ -541,6 +577,7 @@ def main(argv: list[str] | None = None) -> int:
         "where": lambda: cmd_where(args, cat, ws),
         "impacted": lambda: cmd_impacted(args, cat, ws),
         "audit-invariants": lambda: cmd_audit_invariants(args, cat, ws),
+        "matrix": lambda: cmd_matrix(args, cat, ws),
     }
     return dispatch[args.command]()
 
