@@ -1,0 +1,57 @@
+# Impulse Graph Engine — Unified SCIP Polyglot Indexer Container
+# Bundles scip-clang (C++), scip-java (Java/Kotlin/Scala), rust-analyzer (Rust),
+# and scip-python (Python) in one reproducible linux/amd64 image for local dev & CI.
+#
+# Build:
+#   docker build --platform linux/amd64 -f docker/Dockerfile.scip -t impulse-scip-indexer:latest .
+
+FROM --platform=linux/amd64 ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH="/usr/local/cargo/bin:/usr/local/bin:${PATH}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    cmake \
+    ninja-build \
+    clang \
+    lld \
+    pkg-config \
+    maven \
+    openjdk-21-jdk-headless \
+    nodejs \
+    npm \
+    python3 \
+    python3-pip \
+    gzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# 1. scip-clang (C/C++)
+RUN curl -fsSL -o /usr/local/bin/scip-clang \
+      https://github.com/sourcegraph/scip-clang/releases/latest/download/scip-clang-x86_64-linux \
+    && chmod +x /usr/local/bin/scip-clang
+
+# 2. rust-analyzer (Rust native `rust-analyzer scip`)
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
+    && rustup component add rust-analyzer
+
+# 3. scip-java (Java / Kotlin / Scala via Coursier)
+RUN curl -fsSL https://github.com/coursier/coursier/releases/latest/download/cs-x86_64-pc-linux.gz \
+      | gzip -d > /usr/local/bin/cs \
+    && chmod +x /usr/local/bin/cs \
+    && cs bootstrap com.sourcegraph:scip-java_2.13:latest.release -o /usr/local/bin/scip-java \
+    && chmod +x /usr/local/bin/scip-java
+
+# 4. scip-python (Python via npm)
+RUN npm install -g @sourcegraph/scip-python \
+    && npm cache clean --force
+
+COPY docker/run-scip.sh /usr/local/bin/run-scip.sh
+RUN chmod +x /usr/local/bin/run-scip.sh
+
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/run-scip.sh"]

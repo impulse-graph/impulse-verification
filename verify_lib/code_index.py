@@ -12,7 +12,12 @@ from typing import Any
 from .catalog import WorkspacePaths
 from .coverage import load_spec_opcodes
 from .runner import graph_data_dir
-from .scip_ingest import decode_scip_file, run_available_scip_indexers, scip_index_to_ir
+from .scip_ingest import (
+    decode_scip_file,
+    run_available_scip_indexers,
+    run_docker_scip_indexers,
+    scip_index_to_ir,
+)
 
 
 SKIP_DIRS = frozenset({
@@ -291,13 +296,17 @@ def build_code_index(
     ws: WorkspacePaths,
     *,
     run_scip: bool = False,
+    use_docker: bool = False,
     scip_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Build unified polyglot CodeIndex (SCIP-first + graceful fallback + C-ABI & Opcode bridge)."""
     s_dir = scip_dir or (graph_data_dir(ws) / "scip")
     scip_run_status: dict[str, str] = {}
     if run_scip:
-        scip_run_status = run_available_scip_indexers(ws.repos, s_dir)
+        if use_docker:
+            scip_run_status = run_docker_scip_indexers(ws.root, ws.repos["verification"], s_dir)
+        else:
+            scip_run_status = run_available_scip_indexers(ws.repos, s_dir)
 
     source_files: dict[str, dict[str, Any]] = {}
     symbols: dict[str, dict[str, Any]] = {}
