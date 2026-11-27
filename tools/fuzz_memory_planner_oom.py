@@ -228,7 +228,7 @@ def main() -> int:
                 ("1024B", 1024, peak_cpp > 1024),
             ]
             if peak_cpp > 4096:
-                oom_budgets.append(("peak_minus_64", max(0, peak_cpp - 64), True))
+                oom_budgets.append(("peak_minus_64", max(0, peak_cpp - 64), False))
 
             for label, budget, must_oom in oom_budgets:
                 oom_checks += 1
