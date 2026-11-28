@@ -52,7 +52,7 @@ def main():
     args = parser.parse_args()
 
     spec_dir = Path(args.spec_dir) if args.spec_dir else (ROOT_DIR / "impulse-graph-spec")
-    core_cpp = ROOT_DIR / ".worktrees" / "v11-m3" / "impulse-graph-core" / "impulse-cpp"
+    core_cpp = ROOT_DIR / "impulse-graph-core" / "impulse-cpp"
     if not core_cpp.exists():
         core_cpp = ROOT_DIR / "impulse-graph-core" / "impulse-cpp"
     ext = "dylib" if sys.platform == "darwin" else "so"

@@ -3,7 +3,7 @@
 fuzz_vm_contracts.py — ImpulseVM v0.11.0 Contract-Guided & Validator Differential Fuzzer.
 
 Drives generation directly from the frozen v0.11 ISA (`v0.11-refactor/isa_v0_11.yaml` via
-`v11_isa_loader.load_isa()`) and assembles programs via `impas_v11_assembler.ImpAsmV11`
+`v11_isa_loader.load_isa()`) and assembles programs via `impas_v11_assembler.ImpAsm`
 (zero duplicated opcode tables).
 
 Features:
@@ -38,6 +38,8 @@ from typing import Any
 TOOLS_DIR = Path(__file__).resolve().parent
 REPO_DIR = TOOLS_DIR.parent
 ROOT_DIR = REPO_DIR.parent
+if ROOT_DIR.parent.name == ".worktrees":
+    ROOT_DIR = ROOT_DIR.parent.parent
 
 GREEN = "\033[92m"
 RED = "\033[91m"
@@ -3018,7 +3020,7 @@ def _worker_init(cfg: dict[str, Any]) -> None:
     v11_isa_loader, impas_v11_assembler = _import_spec_modules(spec_dir)
     _W_MODS = (v11_isa_loader, impas_v11_assembler)
     isa = v11_isa_loader.load_isa(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
-    _W_ASM = impas_v11_assembler.ImpAsmV11(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
+    _W_ASM = impas_v11_assembler.ImpAsm(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
     _W_FUZZER = V11ContractFuzzer(isa, _W_ASM, set(cfg["pillars"]))
     corpus_dirs = [Path(d) for d in cfg.get("corpus_dirs", [])]
     if corpus_dirs:

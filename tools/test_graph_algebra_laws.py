@@ -645,12 +645,12 @@ def main() -> int:
     parser.add_argument(
         "--cpp-on-cmd",
         type=str,
-        default="/Users/jesse/impulse/.worktrees/v11-m3/impulse-graph-core/impulse-cpp/build_on/vm_fixture_batch_runner",
+        default="/Users/jesse/impulse/impulse-graph-core/impulse-cpp/build_on/vm_fixture_batch_runner",
     )
     parser.add_argument(
         "--cpp-off-cmd",
         type=str,
-        default="/Users/jesse/impulse/.worktrees/v11-m3/impulse-graph-core/impulse-cpp/build_off/vm_fixture_batch_runner",
+        default="/Users/jesse/impulse/impulse-graph-core/impulse-cpp/build_off/vm_fixture_batch_runner",
     )
     parser.add_argument("--engines", type=str, default="java,cpp_on,cpp_off")
     parser.add_argument("--profiles", type=str, default="P0,P1,P2,P3")
@@ -663,7 +663,7 @@ def main() -> int:
     lib_path = args.lib_path or _discover_default_lib()
     spec_dir = resolve_spec_dir(args.spec_dir)
     _, impas_asm = _import_spec_modules(spec_dir)
-    asm = impas_asm.ImpAsmV11(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
+    asm = impas_asm.ImpAsm(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
     schema = load_snapshot_schema(snap_path, lib_path)
 
     profiles = [p.strip() for p in args.profiles.split(",") if p.strip()]

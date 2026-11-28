@@ -44,8 +44,9 @@ from fuzz_vm_contracts import (
 
 def default_cpp_on_cmd() -> str:
     root = TOOLS_DIR.parent.parent
+    if root.parent.name == ".worktrees":
+        root = root.parent.parent
     for cand in [
-        root / ".worktrees" / "v11-m3" / "impulse-graph-core" / "impulse-cpp" / "build_on" / "vm_fixture_batch_runner",
         root / "impulse-graph-core" / "impulse-cpp" / "build_on" / "vm_fixture_batch_runner",
     ]:
         if cand.exists():
@@ -199,7 +200,7 @@ def main() -> int:
     lib_path = args.lib_path or _discover_default_lib()
     spec_dir = resolve_spec_dir(args.spec_dir)
     _, impas_asm = _import_spec_modules(spec_dir)
-    asm = impas_asm.ImpAsmV11(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
+    asm = impas_asm.ImpAsm(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
     schema = load_snapshot_schema(snap_path, lib_path)
 
     cases = build_cases(schema)
