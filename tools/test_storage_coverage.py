@@ -7,11 +7,12 @@ and asserts:
   1. Topology Equivalence: every EQ_REL_* variant matches canonical EQ_REL_ALL3_U32
      across all supported topologies (CSR, CSC, COO_FWD, COO_REV, MORSEL_FWD) and
      returns ERR_INVALID_OPERAND (6) when a topology is absent.
-  2. Attribute Equivalence: every EQ_NUM_* (i8..u64, f32, f64) matches EQ_NUM_F64
-     on node gather+cmp and edge morsel gather+cmp; every EQ_NUM_NULL_* matches
-     EQ_NUM_NULL_F64.
-  3. Boundary Parity: BOUNDARY_FP_* (-inf, +inf, -0.0, +0.0, NaN->NULL) and
-     BOUNDARY_INT_* (min/max/NULL) match across C++ (-O3/-O0) and Java 25.
+  2. Attribute Equivalence: every EQ_NUM_* (i8..u64, f32, f64, decimal64 across
+     multiple precision/scale pairs) matches EQ_NUM_F64 on node gather+cmp and
+     edge morsel gather+cmp; every EQ_NUM_NULL_* matches EQ_NUM_NULL_F64.
+  3. Boundary Parity: BOUNDARY_FP_* (-inf, +inf, -0.0, +0.0, NaN->NULL),
+     BOUNDARY_INT_* (min/max/NULL), and BOUNDARY_DEC_* (P18/P6/P1, S0/S6, NULL)
+     match across C++ (-O3/-O0) and Java 25.
   4. Multi-Lane vs Single-Lane Equivalence:
        - ml_k1_auto_2hop == ml_k1_force_w64_2hop == ml_k1_morsel_2hop == single_1seed_2hop
        - ml_k{8,16,32,64}_auto_2hop == ml_k{8,16,32,64}_morsel_2hop
@@ -26,8 +27,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path("/Users/jesse/impulse")
-CPP_ON = ROOT / ".worktrees/v11-m3/impulse-graph-core/impulse-cpp/build_on/bench_storage_coverage"
-CPP_OFF = ROOT / ".worktrees/v11-m3/impulse-graph-core/impulse-cpp/build_off/bench_storage_coverage"
+CPP_ON = ROOT / "impulse-graph-core/impulse-cpp/build_on/bench_storage_coverage"
+CPP_OFF = ROOT / "impulse-graph-core/impulse-cpp/build_off/bench_storage_coverage"
 JAVA_CP = ":".join([
     str(ROOT / "impulse-graph-java/impulse-vm/target/test-classes"),
     str(ROOT / "impulse-graph-java/impulse-vm/target/classes"),
@@ -114,7 +115,7 @@ def main() -> int:
 
     # 2. Attribute Type Equivalence & Perf Sweep
     print("\n=== 2. ATTRIBUTE TYPE SWEEP (EQ_NUM_* / EQ_NUM_NULL_*) ===")
-    print(f"{'Scope':<12s} {'Attr':<20s} {'C++ us':>9s} {'Java us':>9s} {'J/C':>6s} {'Count':>7s}")
+    print(f"{'Scope':<12s} {'Attr':<26s} {'C++ us':>9s} {'Java us':>9s} {'J/C':>6s} {'Count':>7s}")
     expected_counts: dict[tuple[str, bool], int] = {}
     for idx, a_c in enumerate(cpp_on["attrs"]):
         key = (a_c["scope"], "_NULL_" in a_c["name"])
@@ -127,16 +128,16 @@ def main() -> int:
                 failures.append(f"[{ename}] attr {a['scope']}.{a['name']}: expected st=0 count={exp}, got st={a['st']} count={a['count']}")
         a_j = java["attrs"][idx]
         ratio = (a_j["us"] / a_c["us"]) if a_c["us"] > 0.01 else 0.0
-        print(f"{a_c['scope']:<12s} {a_c['name']:<20s} {a_c['us']:9.2f} {a_j['us']:9.2f} {ratio:5.2f}x {a_c['count']:7d}")
+        print(f"{a_c['scope']:<12s} {a_c['name']:<26s} {a_c['us']:9.2f} {a_j['us']:9.2f} {ratio:5.2f}x {a_c['count']:7d}")
 
-    # 3. Boundary Checks (IEEE-754 + Int64/UInt64 + NULL)
-    print("\n=== 3. BOUNDARY CHECKS (IEEE-754 & INT64/UINT64 & NULL) ===")
+    # 3. Boundary Checks (IEEE-754 + Int64/UInt64 + DECIMAL64 + NULL)
+    print("\n=== 3. BOUNDARY CHECKS (IEEE-754 & INT64/UINT64 & DECIMAL64 & NULL) ===")
     for idx, b_c in enumerate(cpp_on["boundaries"]):
         for ename, edata in engines.items():
             b = edata["boundaries"][idx]
             if b != b_c:
                 failures.append(f"[{ename}] boundary {b_c['name']} mismatch: cpp_on={b_c} vs {ename}={b}")
-        print(f"  {b_c['name']:<20s} count_valid={b_c['count_valid']} min={b_c['min']} max={b_c['max']}")
+        print(f"  {b_c['name']:<24s} count_valid={b_c['count_valid']} min={b_c['min']} max={b_c['max']}")
 
     # 4. Multi-Lane vs Single-Lane Equivalence & Perf Sweep
     print("\n=== 4. MULTI-LANE VS SINGLE-LANE & MORSEL SWEEP ===")
