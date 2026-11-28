@@ -55,7 +55,7 @@ def main() -> int:
     lib_path = args.lib_path or _discover_default_lib()
     spec_dir = resolve_spec_dir(args.spec_dir)
     _, impas_asm = _import_spec_modules(spec_dir)
-    asm = impas_asm.ImpAsmV11(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
+    asm = impas_asm.ImpAsm(spec_dir / "v0.11-refactor" / "isa_v0_11.yaml")
     schema = load_snapshot_schema(snap_path, lib_path)
 
     java_cmd = discover_default_java_cmd()

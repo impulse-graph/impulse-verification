@@ -4,8 +4,8 @@ ImpulseVM Cross-Compiler & Optimizer Parity Validation Harness (v0.10 CEL & v0.1
 
 In --isa v11 mode (default), compiles and executes every .impscm fixture in
 impulse-graph-spec/test-fixtures/impscm-v11/ across 4 configurations:
-  1. C++20 (build_v11_on,  opt-ON)
-  2. C++20 (build_v11_off, opt-OFF)
+  1. C++20 (build_on,  opt-ON)
+  2. C++20 (build_off, opt-OFF)
   3. Java 25 (opt-ON)
   4. Java 25 (opt-OFF)
 Asserting 100% semantic collected output identity, exact .impb byte parity between
@@ -37,8 +37,11 @@ def _find_cpp_lib(build_name: str) -> Path:
         if cand.exists():
             return cand
     root = Path(__file__).resolve().parent.parent.parent
+    if root.parent.name == ".worktrees":
+        root = root.parent.parent
+    if root.parent.name == ".worktrees":
+        root = root.parent.parent
     for base in (
-        root / ".worktrees" / "v11-m3" / "impulse-graph-core" / "impulse-cpp" / build_name,
         root / "impulse-graph-core" / "impulse-cpp" / build_name,
     ):
         cand = base / _lib_filename()
@@ -145,37 +148,37 @@ def run_cpp_v11(lib_path: Path, fixture_path: Path, opt_level: int, snap_kind: s
     lib = ctypes.CDLL(str(lib_path))
     snap = _build_cpp_snapshot(lib, snap_kind, tmp_dir)
 
-    lib.impulse_compile_impscm_v11.argtypes = [
+    lib.impulse_compile_impscm.argtypes = [
         ctypes.c_char_p, ctypes.c_void_p, ctypes.c_int,
         ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.POINTER(ctypes.c_size_t),
         ctypes.c_char_p, ctypes.c_size_t,
     ]
-    lib.impulse_compile_impscm_v11.restype = ctypes.c_int
-    lib.impulse_vm_v11_free_bytes.argtypes = [ctypes.POINTER(ctypes.c_uint8)]
+    lib.impulse_compile_impscm.restype = ctypes.c_int
+    lib.impulse_vm_free_bytes.argtypes = [ctypes.POINTER(ctypes.c_uint8)]
     lib.impulse_workspace_init.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_void_p)]
     lib.impulse_workspace_init.restype = ctypes.c_uint32
-    lib.impulse_vm_execute_v11.argtypes = [
+    lib.impulse_vm_execute.argtypes = [
         ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.POINTER(ParamsV11),
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t),
     ]
-    lib.impulse_vm_execute_v11.restype = ctypes.c_uint32
-    lib.impulse_vm_v11_get_output_count.argtypes = [ctypes.c_void_p]
-    lib.impulse_vm_v11_get_output_count.restype = ctypes.c_uint32
-    lib.impulse_vm_v11_get_output.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(OutputViewV11)]
-    lib.impulse_vm_v11_get_output.restype = ctypes.c_int
+    lib.impulse_vm_execute.restype = ctypes.c_uint32
+    lib.impulse_vm_get_output_count.argtypes = [ctypes.c_void_p]
+    lib.impulse_vm_get_output_count.restype = ctypes.c_uint32
+    lib.impulse_vm_get_output.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(OutputViewV11)]
+    lib.impulse_vm_get_output.restype = ctypes.c_int
     lib.impulse_snapshot_close.argtypes = [ctypes.c_void_p]
 
     src = fixture_path.read_text("utf-8").encode("utf-8")
     out_ptr = ctypes.POINTER(ctypes.c_uint8)()
     out_len = ctypes.c_size_t(0)
     err_buf = ctypes.create_string_buffer(512)
-    rc = lib.impulse_compile_impscm_v11(src, snap, opt_level, ctypes.byref(out_ptr), ctypes.byref(out_len), err_buf, 512)
+    rc = lib.impulse_compile_impscm(src, snap, opt_level, ctypes.byref(out_ptr), ctypes.byref(out_len), err_buf, 512)
     if rc != 0:
         lib.impulse_snapshot_close(snap)
         return {"status": "compile_error", "error": err_buf.value.decode("utf-8", errors="replace")}
 
     impb_bytes = bytes(out_ptr[:out_len.value])
-    lib.impulse_vm_v11_free_bytes(out_ptr)
+    lib.impulse_vm_free_bytes(out_ptr)
 
     # 128-byte aligned workspace
     raw_buf = (ctypes.c_uint8 * (1024 * 1024 + 128))()
@@ -187,17 +190,17 @@ def run_cpp_v11(lib_path: Path, fixture_path: Path, opt_level: int, snap_kind: s
     bindings = (ParamBindingV11 * max(1, len(param_vals)))()
     for i, val in enumerate(param_vals):
         bindings[i].param_id = i
-        bindings[i].kind = 2  # IMPULSE_VM_V11_PARAM_SCALAR_U64
+        bindings[i].kind = 2  # IMPULSE_VM_PARAM_SCALAR_U64
         bindings[i].scalar_bits = val
     params = ParamsV11(gas_limit=100000, geometry_override=None,
                        bindings=bindings if param_vals else None, binding_count=len(param_vals))
 
-    vm_st = lib.impulse_vm_execute_v11(impb_bytes, len(impb_bytes), snap, ctypes.byref(params), ws, None, 0, None)
-    n_out = lib.impulse_vm_v11_get_output_count(ws)
+    vm_st = lib.impulse_vm_execute(impb_bytes, len(impb_bytes), snap, ctypes.byref(params), ws, None, 0, None)
+    n_out = lib.impulse_vm_get_output_count(ws)
     outputs = []
     for i in range(n_out):
         ov = OutputViewV11()
-        assert lib.impulse_vm_v11_get_output(ws, i, ctypes.byref(ov)) == 1
+        assert lib.impulse_vm_get_output(ws, i, ctypes.byref(ov)) == 1
         outputs.append([int(ov.i64_data[k]) for k in range(ov.length)])
 
     lib.impulse_snapshot_close(snap)
@@ -205,7 +208,8 @@ def run_cpp_v11(lib_path: Path, fixture_path: Path, opt_level: int, snap_kind: s
 
 
 def run_java_v11(fixture_path: Path, opt_level: int, snap_kind: str, param_vals: list[int]):
-    java_dir = Path(__file__).resolve().parent.parent.parent / "impulse-graph-java"
+    _r = Path(__file__).resolve().parent.parent.parent
+    java_dir = (_r.parent.parent if _r.parent.name == ".worktrees" else _r) / "impulse-graph-java"
     cp = (
         "impulse-compiler/target/classes:"
         "impulse-vm/target/classes:"
@@ -229,9 +233,11 @@ def run_java_v11(fixture_path: Path, opt_level: int, snap_kind: str, param_vals:
 
 def run_v11_suite() -> int:
     root = Path(__file__).resolve().parent.parent.parent
+    if root.parent.name == ".worktrees":
+        root = root.parent.parent
     spec_dir = root / "impulse-graph-spec" / "test-fixtures" / "impscm-v11"
-    cpp_on_lib = _find_cpp_lib("build_v11_on")
-    cpp_off_lib = _find_cpp_lib("build_v11_off")
+    cpp_on_lib = _find_cpp_lib("build_on")
+    cpp_off_lib = _find_cpp_lib("build_off")
 
     cases = [
         ("01_rebac_reachability.impscm", "rebac", [0, 1], [[1]], None),

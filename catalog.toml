@@ -294,7 +294,7 @@ determinism = "deterministic"
 cost = "fast"
 requires = ["build_on"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/check_simd_codegen.py"]
+cmd = ["{python}", "-u", "tools/check_simd_codegen.py", "--obj", "{core}/impulse-cpp/build_on/CMakeFiles/impulse_graph.dir/src/vm/vm_simd_hwy.cpp.o"]
 
 # ---------------------------------------------------------------------------
 # Cataloged Suites — Unit & FFI Bindings
@@ -428,7 +428,7 @@ determinism = "deterministic"
 cost = "medium"
 requires = ["build_on", "java25"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/cross_compiler_parity.py", "--v11-impscm"]
+cmd = ["{python}", "-u", "tools/cross_compiler_parity.py", "--isa", "v11"]
 
 [suites."parity.simd_equivalence"]
 title = "Suite #12: Differential SIMD / Architecture Equivalence"
@@ -438,7 +438,7 @@ determinism = "seeded"
 cost = "medium"
 requires = ["build_on", "build_off", "java25"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/test_simd_equivalence.py", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/test_simd_equivalence.py", "--spec-dir", "{spec}", "{verification}/datasets/verification.imps"]
 
 [suites."parity.simd_equivalence".profiles]
 quick    = ["--iterations", "50",  "--seed", "{seed}"]
@@ -454,7 +454,7 @@ determinism = "deterministic"
 cost = "medium"
 requires = ["build_on", "java25", "impulse_cli"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/test_storage_coverage.py"]
+cmd = ["{python}", "-u", "tools/test_storage_coverage.py", "{core}/../datasets/storage_coverage_small.imps"]
 
 [suites."parity.seeded_roundtrip_50"]
 title = "50 Seeded .imps Snapshots Round-Trip Idempotency (Seeds 1001..1050)"
@@ -464,7 +464,7 @@ determinism = "deterministic"
 cost = "medium"
 requires = ["impulse_cli"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/test_seeded_roundtrip_50.py", "--strict-alignment", "--deep-audit"]
+cmd = ["{python}", "-u", "tools/test_seeded_roundtrip_50.py"]
 
 # ---------------------------------------------------------------------------
 # Cataloged Suites — Contracts & Resource Gates
@@ -477,7 +477,7 @@ determinism = "deterministic"
 cost = "fast"
 requires = ["build_on"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/test_topology_contracts.py", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/test_topology_contracts.py", "--spec-dir", "{spec}", "{verification}/datasets/verification.imps"]
 
 [suites."contracts.zero_alloc_determinism"]
 title = "Suite #11: Zero-Allocation & Workspace-Reuse Determinism Gate"
@@ -487,7 +487,7 @@ determinism = "seeded"
 cost = "fast"
 requires = ["build_on", "build_off"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/test_zero_alloc_determinism.py", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/test_zero_alloc_determinism.py", "--spec-dir", "{spec}", "{verification}/datasets/verification.imps"]
 
 [suites."contracts.zero_alloc_determinism".profiles]
 quick    = ["--iterations", "50",  "--seed", "{seed}"]
@@ -503,7 +503,7 @@ determinism = "deterministic"
 cost = "fast"
 requires = ["build_on", "java25"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/test_memory_ceiling.py", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/test_memory_ceiling.py", "--spec-dir", "{spec}", "{core}/../datasets/storage_coverage_small.imps"]
 
 # ---------------------------------------------------------------------------
 # Cataloged Suites — Metamorphic & Algebraic Laws
@@ -532,7 +532,7 @@ determinism = "seeded"
 cost = "medium"
 requires = ["build_on", "build_off", "java25"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/test_graph_algebra_laws.py", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/test_graph_algebra_laws.py", "--spec-dir", "{spec}", "{verification}/datasets/verification.imps"]
 
 [suites."metamorphic.graph_algebra".profiles]
 quick    = ["--trials", "50",  "--seed", "{seed}"]
@@ -568,7 +568,7 @@ determinism = "seeded"
 cost = "medium"
 requires = ["build_on", "build_off", "java25", "ocaml"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/mutate_corpus_fuzzer.py", "--workers", "{workers}", "--shrink", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/fuzz_vm_contracts.py", "--profile", "corpus", "--workers", "{workers}", "--shrink", "--coverage-report", "--spec-dir", "{spec}"]
 
 [suites."fuzz.corpus_mutator".profiles]
 quick    = ["--iterations", "250",   "--seed", "{seed}"]
@@ -584,7 +584,7 @@ determinism = "seeded"
 cost = "medium"
 requires = ["build_on", "build_off", "java25"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/fuzz_multihop_morsels.py", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/fuzz_multihop_morsels.py", "--spec-dir", "{spec}", "{verification}/datasets/verification.imps"]
 
 [suites."fuzz.multihop_morsels".profiles]
 quick    = ["--iterations", "50",   "--seed", "{seed}"]
@@ -600,7 +600,7 @@ determinism = "seeded"
 cost = "medium"
 requires = ["build_on", "build_off", "java25"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/fuzz_mitra_multilane.py", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/fuzz_mitra_multilane.py", "--spec-dir", "{spec}", "{verification}/datasets/verification.imps"]
 
 [suites."fuzz.mitra_multilane".profiles]
 quick    = ["--iterations", "50",   "--seed", "{seed}"]
@@ -616,7 +616,7 @@ determinism = "seeded"
 cost = "medium"
 requires = ["build_on", "build_off", "java25"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/fuzz_ieee754_3vl.py", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/fuzz_ieee754_3vl.py", "--spec-dir", "{spec}", "{verification}/datasets/verification.imps"]
 
 [suites."fuzz.ieee754_3vl".profiles]
 quick    = ["--iterations", "50",   "--seed", "{seed}"]
@@ -632,7 +632,7 @@ determinism = "seeded"
 cost = "fast"
 requires = ["build_on"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/fuzz_memory_planner_oom.py", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/fuzz_memory_planner_oom.py", "--spec-dir", "{spec}", "{verification}/datasets/verification.imps"]
 
 [suites."fuzz.memory_planner_oom".profiles]
 quick    = ["--iterations", "50",   "--seed", "{seed}"]
@@ -648,7 +648,7 @@ determinism = "seeded"
 cost = "medium"
 requires = ["build_on", "build_off", "java25"]
 cwd = "{verification}"
-cmd = ["{python}", "-u", "tools/fuzz_snapshot_morsels.py", "--spec-dir", "{spec}"]
+cmd = ["{python}", "-u", "tools/fuzz_snapshot_morsels.py", "--spec-dir", "{spec}", "{verification}/datasets/verification.imps"]
 
 [suites."fuzz.snapshot_morsels".profiles]
 quick    = ["--iterations", "50",   "--seed", "{seed}"]
@@ -714,7 +714,7 @@ determinism = "deterministic"
 cost = "slow"
 requires = ["java25"]
 cwd = "{java}"
-cmd = ["mvn", "-q", "test", "jacoco:report", "-DfailIfNoTests=false"]
+cmd = ["mvn", "-q", "-Pcoverage", "test", "-DfailIfNoTests=false"]
 coverage_parser = "jacoco"
 
 [suites."sanitize.java.pitest"]

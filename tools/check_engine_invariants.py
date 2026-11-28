@@ -32,7 +32,7 @@ def resolve_roots(java_root: Path | None, cpp_root: Path | None) -> tuple[Path, 
     if java_root is None:
         java_root = ROOT_DIR / "impulse-graph-java"
     if cpp_root is None:
-        wt = ROOT_DIR / ".worktrees" / "v11-m3" / "impulse-graph-core" / "impulse-cpp"
+        wt = ROOT_DIR / "impulse-graph-core" / "impulse-cpp"
         cpp_root = wt if wt.exists() else (ROOT_DIR / "impulse-graph-core" / "impulse-cpp")
     return java_root, cpp_root
 

@@ -470,7 +470,7 @@ def main() -> int:
     spec_dir = resolve_spec_dir(args.spec_dir)
     _, impas_v11 = _import_spec_modules(spec_dir)
 
-    asm = impas_v11.ImpAsmV11()
+    asm = impas_v11.ImpAsm()
     engine_names = [e.strip() for e in args.engines.split(",") if e.strip()]
     clients: dict[str, BatchEngineClient] = {}
     for name in engine_names:
@@ -480,10 +480,10 @@ def main() -> int:
         elif name == "java":
             clients[name] = BatchEngineClient(discover_default_java_cmd(), "java")
         elif name == "cpp_on":
-            b = args.cpp_on_bin or (ROOT_DIR / ".worktrees/v11-m3/impulse-graph-core/impulse-cpp/build_on/vm_fixture_batch_runner")
+            b = args.cpp_on_bin or (ROOT_DIR / "impulse-graph-core/impulse-cpp/build_on/vm_fixture_batch_runner")
             clients[name] = BatchEngineClient([str(b)], "cpp_on")
         elif name == "cpp_off":
-            b = args.cpp_off_bin or (ROOT_DIR / ".worktrees/v11-m3/impulse-graph-core/impulse-cpp/build_off/vm_fixture_batch_runner")
+            b = args.cpp_off_bin or (ROOT_DIR / "impulse-graph-core/impulse-cpp/build_off/vm_fixture_batch_runner")
             clients[name] = BatchEngineClient([str(b)], "cpp_off")
         else:
             raise ValueError(f"Unknown engine: {name}")
